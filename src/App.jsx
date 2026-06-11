@@ -1210,10 +1210,16 @@ function Home({ go, weekPct, backlogCount, name, setName }) {
   );
 }
 
-/* ================= IDENTITY, STORAGE & SYNC ================= */
+/* ================= IDENTITY, STORAGE & SYNC =================
+   Code-based identity, no personal data. The instructor pre-issues seat codes
+   (e.g. NW-7K2Q); the code is both the learner's identity and their secret.
+   Entering it on any device loads their work (cross-device); an unknown code
+   cannot write. Data lives in an isolated `cockpit` schema, reached only via the
+   service-role edge function — no Supabase Auth, so no risk to other apps. */
 const STORAGE_PREFIX = "cockpit";
-const PROFILES_KEY = `${STORAGE_PREFIX}:profiles`;
-const dataKey = (id) => `${STORAGE_PREFIX}:v2:${id}`;
+const PROFILES_KEY = `${STORAGE_PREFIX}:profiles:v3`;
+const dataKey = (code) => `${STORAGE_PREFIX}:v3:${code}`;
+const normCode = (c) => String(c || "").trim().toUpperCase();
 
 const SUPA_URL = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
 const SUPA_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
@@ -1223,40 +1229,39 @@ const ls = {
   get(key) { try { return typeof localStorage !== "undefined" ? localStorage.getItem(key) : null; } catch { return null; } },
   set(key, val) { try { if (typeof localStorage !== "undefined") localStorage.setItem(key, val); } catch (e) {} },
 };
-const uuid = () =>
-  typeof crypto !== "undefined" && crypto.randomUUID
-    ? crypto.randomUUID()
-    : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-        const r = (Math.random() * 16) | 0;
-        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
-      });
-
 const fnHeaders = () => ({ "Content-Type": "application/json", apikey: SUPA_ANON, Authorization: `Bearer ${SUPA_ANON}` });
-async function syncSave(learner, data) {
-  if (!FN_URL) return;
+
+// Sign in with a seat code — also the cross-device data load. Distinguishes
+// unknown code (rejected) from offline (so returning users can work locally).
+async function apiSignin(code) {
+  if (!FN_URL) return { ok: false, offline: true };
   try {
-    await fetch(FN_URL, { method: "POST", headers: fnHeaders(), body: JSON.stringify({ action: "save", learnerId: learner.learnerId, cohort: learner.cohort, name: learner.name, data }) });
-  } catch (e) { /* offline — local copy is source of truth */ }
+    const res = await fetch(FN_URL, { method: "POST", headers: fnHeaders(), body: JSON.stringify({ action: "signin", code }) });
+    if (res.status === 404) return { ok: false, unknown: true };
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: body.error || `Error ${res.status}` };
+    return { ok: true, seat: body.seat };
+  } catch (e) { return { ok: false, offline: true }; }
+}
+async function apiSave(code, handle, data) {
+  if (!FN_URL) return;
+  try { await fetch(FN_URL, { method: "POST", headers: fnHeaders(), body: JSON.stringify({ action: "save", code, handle, data }) }); }
+  catch (e) { /* offline — local copy is source of truth, resyncs on next change */ }
 }
 async function adminList(cohort, adminKey) {
   if (!FN_URL) throw new Error("Backend not configured (VITE_SUPABASE_URL is missing).");
   const res = await fetch(FN_URL, { method: "POST", headers: fnHeaders(), body: JSON.stringify({ action: "list", cohort: cohort || undefined, adminKey }) });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
-  return body.sessions || [];
+  return body.seats || [];
 }
-// Check a cohort code at sign-in. Fails OPEN: if the backend is unconfigured or
-// unreachable, we never block the learner — the app still works local-only.
-async function verifyCohort(cohort) {
-  if (!FN_URL) return { allowed: true, enforced: false };
-  try {
-    const res = await fetch(FN_URL, { method: "POST", headers: fnHeaders(), body: JSON.stringify({ action: "verify", cohort }) });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) return { allowed: true, enforced: false };
-    return { allowed: body.allowed !== false, enforced: !!body.enforced };
-  } catch (e) { return { allowed: true, enforced: false }; }
+async function adminGenerate(cohort, count, adminKey) {
+  if (!FN_URL) throw new Error("Backend not configured (VITE_SUPABASE_URL is missing).");
+  const res = await fetch(FN_URL, { method: "POST", headers: fnHeaders(), body: JSON.stringify({ action: "generate", cohort, count, adminKey }) });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+  return body.codes || [];
 }
-const COHORT_ERR = "That cohort code isn't recognised. Check it with your facilitator.";
 function loadProfiles() {
   try { const p = JSON.parse(ls.get(PROFILES_KEY) || "{}"); return { active: p.active || null, list: Array.isArray(p.list) ? p.list : [] }; }
   catch { return { active: null, list: [] }; }
@@ -1274,7 +1279,7 @@ const NAV = [
   { id: "strategy", label: "My Strategy", icon: Rocket },
 ];
 
-function Cockpit({ learner, profiles, onPick, onAdd, onRemove, onRename, openAdmin }) {
+function Cockpit({ learner, profiles, onPick, onClaim, onRemove, onRename, openAdmin }) {
   const [view, setView] = useState("home");
   const [day, setDay] = useState(1);
   const [answers, setAnswers] = useState({});
@@ -1286,24 +1291,37 @@ function Cockpit({ learner, profiles, onPick, onAdd, onRemove, onRename, openAdm
   const [switcher, setSwitcher] = useState(false);
   const syncTimer = useRef();
 
+  // Load this learner's work: prefer the server copy (cross-device), fall back
+  // to the local cache when offline.
   useEffect(() => {
+    let alive = true;
     setLoaded(false);
-    let d = {};
-    try { d = JSON.parse(ls.get(dataKey(learner.learnerId)) || "{}"); } catch (e) {}
-    setAnswers(d.answers || {}); setDone(d.done || {}); setWork(d.work || {});
-    setBacklog(d.backlog || []); setPlan(d.plan || "");
-    setView("home"); setDay(1); setLoaded(true);
-  }, [learner.learnerId]);
+    (async () => {
+      let d = {};
+      try { d = JSON.parse(ls.get(dataKey(learner.code)) || "{}"); } catch (e) {}
+      const r = await apiSignin(learner.code);
+      if (r.ok && r.seat) {
+        d = r.seat.data || {};
+        ls.set(dataKey(learner.code), JSON.stringify(d));
+        if (r.seat.handle && r.seat.handle !== learner.handle) onRename(r.seat.handle);
+      }
+      if (!alive) return;
+      setAnswers(d.answers || {}); setDone(d.done || {}); setWork(d.work || {});
+      setBacklog(d.backlog || []); setPlan(d.plan || "");
+      setView("home"); setDay(1); setLoaded(true);
+    })();
+    return () => { alive = false; };
+  }, [learner.code]);
 
   useEffect(() => {
     if (!loaded) return;
     const data = { answers, done, work, backlog, plan };
-    ls.set(dataKey(learner.learnerId), JSON.stringify(data));
+    ls.set(dataKey(learner.code), JSON.stringify(data));
     clearTimeout(syncTimer.current);
-    const snap = { learnerId: learner.learnerId, cohort: learner.cohort, name: learner.name };
-    syncTimer.current = setTimeout(() => syncSave(snap, data), 1200);
+    const code = learner.code, handle = learner.handle;
+    syncTimer.current = setTimeout(() => apiSave(code, handle, data), 1200);
     return () => clearTimeout(syncTimer.current);
-  }, [answers, done, work, backlog, plan, loaded, learner.learnerId, learner.cohort, learner.name]);
+  }, [answers, done, work, backlog, plan, loaded, learner.code, learner.handle]);
 
   const doneCount = ALL_IDS.filter((id) => done[id]).length;
   const weekPct = Math.round((doneCount / ALL_IDS.length) * 100);
@@ -1317,10 +1335,10 @@ function Cockpit({ learner, profiles, onPick, onAdd, onRemove, onRename, openAdm
         </div>
         <button onClick={() => setSwitcher(true)}
           style={{ width: "100%", textAlign: "left", cursor: "pointer", border: `1px solid ${C.line}`, background: C.light, borderRadius: 10, padding: "8px 10px", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 999, background: C.teal, color: "#fff", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>{(learner.name || "?").trim().charAt(0).toUpperCase() || "?"}</div>
+          <div style={{ width: 26, height: 26, borderRadius: 999, background: C.teal, color: "#fff", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>{((learner.handle || learner.code || "?").trim().charAt(0) || "?").toUpperCase()}</div>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{learner.name || "Learner"}</div>
-            <div style={{ fontSize: 10.5, color: C.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Cohort {learner.cohort}</div>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{learner.handle || learner.code}</div>
+            <div style={{ fontSize: 10.5, color: C.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Cohort {learner.cohort} · {learner.code}</div>
           </div>
           <ChevronDown size={15} color={C.muted} />
         </button>
@@ -1340,74 +1358,75 @@ function Cockpit({ learner, profiles, onPick, onAdd, onRemove, onRename, openAdm
         </div>
       </nav>
       <main style={{ flex: 1, padding: "28px clamp(16px, 4vw, 44px)", maxWidth: 1080, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
-        {view === "home" && <Home go={setView} weekPct={weekPct} backlogCount={backlog.length} name={learner.name} setName={onRename} />}
+        {view === "home" && <Home go={setView} weekPct={weekPct} backlogCount={backlog.length} name={learner.handle} setName={onRename} />}
         {view === "explore" && <Explore />}
         {view === "missions" && <Missions day={day} setDay={setDay} answers={answers} setAnswers={setAnswers} done={done} setDone={setDone} work={work} setWork={setWork} go={setView} />}
         {view === "sandbox" && <Sandbox />}
         {view === "backlog" && <Backlog backlog={backlog} setBacklog={setBacklog} />}
-        {view === "strategy" && <Strategy backlog={backlog} plan={plan} setPlan={setPlan} name={learner.name} />}
+        {view === "strategy" && <Strategy backlog={backlog} plan={plan} setPlan={setPlan} name={learner.handle} />}
       </main>
       {switcher && (
         <Switcher learner={learner} profiles={profiles} onClose={() => setSwitcher(false)}
-          onPick={(id) => { onPick(id); setSwitcher(false); }} onAdd={(n, c) => { onAdd(n, c); setSwitcher(false); }}
+          onPick={(c) => { onPick(c); setSwitcher(false); }} onClaim={(seat) => { onClaim(seat); setSwitcher(false); }}
           onRemove={onRemove} openAdmin={() => { setSwitcher(false); openAdmin(); }} />
       )}
     </div>
   );
 }
 
-function Switcher({ learner, profiles, onClose, onPick, onAdd, onRemove, openAdmin }) {
+function Switcher({ learner, profiles, onClose, onPick, onClaim, onRemove, openAdmin }) {
   const [adding, setAdding] = useState(profiles.length === 0);
-  const [name, setName] = useState("");
-  const [cohort, setCohort] = useState(learner ? learner.cohort : "");
-  const [checking, setChecking] = useState(false);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 14, padding: "9px 11px", border: `1px solid ${C.line}`, borderRadius: 9, color: C.ink, background: "#fff" };
+  const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 14, padding: "9px 11px", border: `1px solid ${C.line}`, borderRadius: 9, color: C.ink, background: "#fff", letterSpacing: 1 };
   const submit = async () => {
-    if (!(name.trim() && cohort.trim()) || checking) return;
-    setChecking(true); setErr("");
-    const v = await verifyCohort(cohort.trim());
-    setChecking(false);
-    if (v.enforced && !v.allowed) { setErr(COHORT_ERR); return; }
-    onAdd(name.trim(), cohort.trim());
+    const c = normCode(code);
+    if (!c || busy) return;
+    setBusy(true); setErr("");
+    const r = await apiSignin(c);
+    setBusy(false);
+    if (r.unknown) { setErr("That access code isn't recognised."); return; }
+    if (r.offline) { setErr("Couldn't reach the server — check your connection."); return; }
+    if (!r.ok) { setErr(r.error || "Something went wrong."); return; }
+    onClaim(r.seat);
   };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,37,69,0.4)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "min(440px,100%)", background: "#fff", borderRadius: 16, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", maxHeight: "85vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <H size={19}>Who's working?</H>
+          <H size={19}>Switch learner</H>
           <button onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted }}><X size={20} /></button>
         </div>
         {profiles.length > 0 && (
           <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
             {profiles.map((p) => {
-              const active = learner && p.learnerId === learner.learnerId;
+              const active = learner && p.code === learner.code;
               return (
-                <div key={p.learnerId} style={{ display: "flex", alignItems: "center", gap: 10, border: `1px solid ${active ? C.teal : C.line}`, background: active ? C.cardl : "#fff", borderRadius: 10, padding: "8px 10px" }}>
-                  <div style={{ width: 30, height: 30, borderRadius: 999, background: active ? C.teal : C.muted, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700 }}>{(p.name || "?").charAt(0).toUpperCase()}</div>
-                  <button onClick={() => onPick(p.learnerId)} style={{ flex: 1, textAlign: "left", border: "none", background: "none", cursor: "pointer", minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>{p.name}{active ? " · active" : ""}</div>
-                    <div style={{ fontSize: 11.5, color: C.muted }}>Cohort {p.cohort}</div>
+                <div key={p.code} style={{ display: "flex", alignItems: "center", gap: 10, border: `1px solid ${active ? C.teal : C.line}`, background: active ? C.cardl : "#fff", borderRadius: 10, padding: "8px 10px" }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 999, background: active ? C.teal : C.muted, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700 }}>{((p.handle || p.code || "?").charAt(0) || "?").toUpperCase()}</div>
+                  <button onClick={() => onPick(p.code)} style={{ flex: 1, textAlign: "left", border: "none", background: "none", cursor: "pointer", minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>{p.handle || p.code}{active ? " · active" : ""}</div>
+                    <div style={{ fontSize: 11.5, color: C.muted }}>Cohort {p.cohort} · {p.code}</div>
                   </button>
-                  <button title="Remove from this device" onClick={() => onRemove(p.learnerId)} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted }}><X size={15} /></button>
+                  <button title="Remove from this device" onClick={() => onRemove(p.code)} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted }}><X size={15} /></button>
                 </div>
               );
             })}
           </div>
         )}
         {adding ? (
-          <div style={{ display: "grid", gap: 10, borderTop: `1px solid ${C.line}`, paddingTop: 14 }}>
-            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.muted }}>NEW LEARNER</div>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" style={inp} />
-            <input value={cohort} onChange={(e) => { setCohort(e.target.value); setErr(""); }} placeholder="Cohort / join code" style={inp} />
+          <div style={{ display: "grid", gap: 10, borderTop: profiles.length ? `1px solid ${C.line}` : "none", paddingTop: profiles.length ? 14 : 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.muted }}>ADD A SEAT</div>
+            <input value={code} onChange={(e) => { setCode(e.target.value.toUpperCase()); setErr(""); }} placeholder="Access code (e.g. NW-7K2Q)" style={inp} onKeyDown={(e) => e.key === "Enter" && submit()} />
             {err && <p style={{ color: C.red, fontSize: 12.5, margin: 0 }}>⚠ {err}</p>}
             <div style={{ display: "flex", gap: 8 }}>
-              <Btn onClick={submit} disabled={checking}><UserPlus size={15} />{checking ? "Checking…" : "Create"}</Btn>
-              {profiles.length > 0 && <Btn kind="ghost" onClick={() => setAdding(false)}>Cancel</Btn>}
+              <Btn onClick={submit} disabled={busy || !normCode(code)}><UserPlus size={15} />{busy ? "Checking…" : "Sign in"}</Btn>
+              {profiles.length > 0 && <Btn kind="ghost" onClick={() => { setAdding(false); setErr(""); }}>Cancel</Btn>}
             </div>
           </div>
         ) : (
-          <Btn kind="ghost" onClick={() => { setName(""); setCohort(learner ? learner.cohort : ""); setAdding(true); }}><Plus size={15} />Add another learner</Btn>
+          <Btn kind="ghost" onClick={() => { setCode(""); setErr(""); setAdding(true); }}><Plus size={15} />Add a seat</Btn>
         )}
         <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
           <button onClick={openAdmin} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted, fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, fontFamily: sans }}>
@@ -1419,23 +1438,25 @@ function Switcher({ learner, profiles, onClose, onPick, onAdd, onRemove, openAdm
   );
 }
 
-function StartGate({ onCreate, openAdmin }) {
-  const [name, setName] = useState("");
-  const [cohort, setCohort] = useState("");
-  const [checking, setChecking] = useState(false);
+function StartGate({ onClaim, openAdmin }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 15, padding: "11px 13px", border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, background: "#fff", marginTop: 6 };
+  const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 18, fontWeight: 700, letterSpacing: 2, textAlign: "center", padding: "13px 13px", border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, background: "#fff", marginTop: 6 };
   const go = async () => {
-    if (!(name.trim() && cohort.trim()) || checking) return;
-    setChecking(true); setErr("");
-    const v = await verifyCohort(cohort.trim());
-    setChecking(false);
-    if (v.enforced && !v.allowed) { setErr(COHORT_ERR); return; }
-    onCreate(name.trim(), cohort.trim());
+    const c = normCode(code);
+    if (!c || busy) return;
+    setBusy(true); setErr("");
+    const r = await apiSignin(c);
+    setBusy(false);
+    if (r.unknown) { setErr("That access code isn't recognised. Check it with your facilitator."); return; }
+    if (r.offline) { setErr("Couldn't reach the server — check your connection and try again."); return; }
+    if (!r.ok) { setErr(r.error || "Something went wrong. Please try again."); return; }
+    onClaim(r.seat);
   };
   return (
     <div style={{ fontFamily: sans, minHeight: "100vh", background: `linear-gradient(135deg, ${C.navy}, ${C.deep})`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ width: "min(460px,100%)", background: "#fff", borderRadius: 18, padding: "30px 28px", boxShadow: "0 24px 70px rgba(0,0,0,0.35)" }}>
+      <div style={{ width: "min(440px,100%)", background: "#fff", borderRadius: 18, padding: "30px 28px", boxShadow: "0 24px 70px rgba(0,0,0,0.35)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
           <div style={{ width: 38, height: 38, borderRadius: 10, background: C.navy, display: "flex", alignItems: "center", justifyContent: "center" }}><Building2 size={21} color={C.gold} /></div>
           <div>
@@ -1443,16 +1464,13 @@ function StartGate({ onCreate, openAdmin }) {
             <div style={{ fontFamily: serif, fontSize: 20, fontWeight: 700, color: C.navy, lineHeight: 1.1 }}>The Northwind Cockpit</div>
           </div>
         </div>
-        <p style={{ color: C.body, fontSize: 14, lineHeight: 1.55, margin: "0 0 18px" }}>Enter your name and the cohort code from your facilitator to start. Your progress saves on this device and to your cohort.</p>
-        <label style={{ fontSize: 12.5, fontWeight: 700, color: C.muted }}>Your name
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Alex Morgan" style={inp} onKeyDown={(e) => e.key === "Enter" && go()} />
-        </label>
-        <label style={{ fontSize: 12.5, fontWeight: 700, color: C.muted, display: "block", marginTop: 14 }}>Cohort / join code
-          <input value={cohort} onChange={(e) => { setCohort(e.target.value); setErr(""); }} placeholder="e.g. JUN-2026" style={inp} onKeyDown={(e) => e.key === "Enter" && go()} />
+        <p style={{ color: C.body, fontSize: 14, lineHeight: 1.55, margin: "0 0 18px" }}>Enter the access code your facilitator gave you. It's your private key — your work follows it on any device.</p>
+        <label style={{ fontSize: 12.5, fontWeight: 700, color: C.muted }}>Access code
+          <input value={code} onChange={(e) => { setCode(e.target.value.toUpperCase()); setErr(""); }} placeholder="NW-XXXXX" style={inp} onKeyDown={(e) => e.key === "Enter" && go()} autoFocus />
         </label>
         {err && <p style={{ color: C.red, fontSize: 13, margin: "10px 0 0" }}>⚠ {err}</p>}
         <div style={{ marginTop: 20 }}>
-          <Btn kind="navy" onClick={go} disabled={!(name.trim() && cohort.trim()) || checking} style={{ width: "100%", justifyContent: "center" }}>{checking ? "Checking…" : "Enter the Cockpit"} {!checking && <ChevronRight size={16} />}</Btn>
+          <Btn kind="navy" onClick={go} disabled={!normCode(code) || busy} style={{ width: "100%", justifyContent: "center" }}>{busy ? "Checking…" : "Enter the Cockpit"} {!busy && <ChevronRight size={16} />}</Btn>
         </div>
         <div style={{ marginTop: 16, textAlign: "center" }}>
           <button onClick={openAdmin} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted, fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: sans }}>
@@ -1472,6 +1490,13 @@ function Admin({ onExit }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(null);
+  // code generator
+  const [genCohort, setGenCohort] = useState("");
+  const [genCount, setGenCount] = useState("10");
+  const [genCodes, setGenCodes] = useState(null);
+  const [genBusy, setGenBusy] = useState(false);
+  const [genErr, setGenErr] = useState("");
+  const [copied, setCopied] = useState(false);
   const inp = { fontFamily: sans, fontSize: 14, padding: "9px 11px", border: `1px solid ${C.line}`, borderRadius: 9, color: C.ink, background: "#fff" };
   const run = async () => {
     setBusy(true); setErr("");
@@ -1479,6 +1504,16 @@ function Admin({ onExit }) {
     catch (e) { setErr(e.message || "Failed to load"); setRows(null); }
     finally { setBusy(false); }
   };
+  const generate = async () => {
+    if (!key.trim()) { setGenErr("Enter the admin passphrase above first."); return; }
+    if (!genCohort.trim()) { setGenErr("Enter a cohort name for the new codes."); return; }
+    setGenBusy(true); setGenErr(""); setGenCodes(null); setCopied(false);
+    try { setGenCodes(await adminGenerate(genCohort.trim(), parseInt(genCount, 10) || 10, key.trim())); }
+    catch (e) { setGenErr(e.message || "Failed to generate"); }
+    finally { setGenBusy(false); }
+  };
+  const copyCodes = async () => { try { await navigator.clipboard.writeText((genCodes || []).join("\n")); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e) {} };
+  const claimedRows = rows ? rows.filter((r) => r.claimed_at) : [];
   return (
     <div style={{ fontFamily: sans, background: C.light, minHeight: "100vh", color: C.body }}>
       <div style={{ background: `linear-gradient(135deg, ${C.navy}, ${C.deep})`, color: "#fff", padding: "20px clamp(16px,4vw,44px)" }}>
@@ -1494,46 +1529,73 @@ function Admin({ onExit }) {
         </div>
       </div>
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px clamp(16px,4vw,44px)" }}>
-        <Card style={{ marginBottom: 18 }}>
+        <Card style={{ marginBottom: 14 }}>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Cohort code <span style={{ fontWeight: 400 }}>(blank = all)</span><br />
-              <input value={cohort} onChange={(e) => setCohort(e.target.value)} placeholder="e.g. JUN-2026" style={{ ...inp, marginTop: 5 }} onKeyDown={(e) => e.key === "Enter" && run()} /></label>
             <label style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Admin passphrase<br />
               <input value={key} onChange={(e) => setKey(e.target.value)} type="password" placeholder="passphrase" style={{ ...inp, marginTop: 5 }} onKeyDown={(e) => e.key === "Enter" && run()} /></label>
-            <Btn kind="navy" onClick={run} disabled={!key.trim() || busy}><RefreshCw size={15} />{busy ? "Loading…" : "Load cohort"}</Btn>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Cohort filter <span style={{ fontWeight: 400 }}>(blank = all)</span><br />
+              <input value={cohort} onChange={(e) => setCohort(e.target.value)} placeholder="e.g. JUN-2026" style={{ ...inp, marginTop: 5 }} onKeyDown={(e) => e.key === "Enter" && run()} /></label>
+            <Btn kind="navy" onClick={run} disabled={!key.trim() || busy}><RefreshCw size={15} />{busy ? "Loading…" : "Load roster"}</Btn>
           </div>
           {err && <p style={{ color: C.amber, fontSize: 13, marginTop: 10, marginBottom: 0 }}>⚠ {err}</p>}
         </Card>
+
+        <Card style={{ marginBottom: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}><UserPlus size={17} color={C.teal} /><H size={16}>Issue access codes</H></div>
+          <p style={{ color: C.body, fontSize: 13, margin: "0 0 10px" }}>Generate seat codes for a cohort, then hand them out — one per learner. The code is their identity and key; their work follows it across devices.</p>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Cohort name<br />
+              <input value={genCohort} onChange={(e) => setGenCohort(e.target.value)} placeholder="e.g. JUN-2026" style={{ ...inp, marginTop: 5 }} /></label>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>How many<br />
+              <input value={genCount} onChange={(e) => setGenCount(e.target.value.replace(/[^0-9]/g, ""))} placeholder="10" style={{ ...inp, marginTop: 5, width: 80 }} /></label>
+            <Btn onClick={generate} disabled={genBusy}><Plus size={15} />{genBusy ? "Generating…" : "Generate codes"}</Btn>
+          </div>
+          {genErr && <p style={{ color: C.amber, fontSize: 13, marginTop: 10, marginBottom: 0 }}>⚠ {genErr}</p>}
+          {genCodes && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: C.navy }}>{genCodes.length} code{genCodes.length === 1 ? "" : "s"} for “{genCohort.trim()}”</span>
+                <Btn small kind="ghost" onClick={copyCodes}>{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "Copied" : "Copy all"}</Btn>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, background: C.light, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12 }}>
+                {genCodes.map((c) => <span key={c} style={{ fontFamily: "Consolas, monospace", fontSize: 13.5, fontWeight: 700, color: C.navy, background: "#fff", border: `1px solid ${C.line}`, borderRadius: 7, padding: "4px 9px", letterSpacing: 1 }}>{c}</span>)}
+              </div>
+            </div>
+          )}
+        </Card>
+
         {rows && (
           <div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 16 }}>
-              <Stat label="LEARNERS" value={rows.length} />
-              <Stat label="AVG PROGRESS" value={`${rows.length ? Math.round(rows.reduce((a, r) => a + pctOf(r.data?.done), 0) / rows.length) : 0}%`} />
+              <Stat label="SEATS" value={rows.length} />
+              <Stat label="CLAIMED" value={claimedRows.length} />
+              <Stat label="AVG PROGRESS" value={`${claimedRows.length ? Math.round(claimedRows.reduce((a, r) => a + pctOf(r.data?.done), 0) / claimedRows.length) : 0}%`} />
               <Stat label="OPPORTUNITIES" value={rows.reduce((a, r) => a + (r.data?.backlog?.length || 0), 0)} />
-              <Stat label="PLANS WRITTEN" value={rows.filter((r) => (r.data?.plan || "").trim()).length} />
             </div>
-            {rows.length === 0 && <Card><p style={{ margin: 0, color: C.muted }}>No sessions yet for this cohort.</p></Card>}
+            {rows.length === 0 && <Card><p style={{ margin: 0, color: C.muted }}>No seats yet for this cohort. Generate some codes above.</p></Card>}
             <div style={{ display: "grid", gap: 10 }}>
               {rows.map((r) => {
+                const claimed = !!r.claimed_at;
                 const pct = pctOf(r.data?.done);
                 const bl = r.data?.backlog || [];
-                const isOpen = open === r.learner_id;
+                const isOpen = open === r.code;
+                const title = r.handle || (claimed ? "(no name set)" : "Unclaimed seat");
                 return (
-                  <Card key={r.learner_id} style={{ padding: 0, overflow: "hidden" }}>
-                    <button onClick={() => setOpen(isOpen ? null : r.learner_id)}
-                      style={{ width: "100%", border: "none", background: "none", cursor: "pointer", textAlign: "left", padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-                      <div style={{ width: 34, height: 34, borderRadius: 999, background: C.teal, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{(r.name || "?").charAt(0).toUpperCase()}</div>
+                  <Card key={r.code} style={{ padding: 0, overflow: "hidden", opacity: claimed ? 1 : 0.7 }}>
+                    <button onClick={() => claimed && setOpen(isOpen ? null : r.code)}
+                      style={{ width: "100%", border: "none", background: "none", cursor: claimed ? "pointer" : "default", textAlign: "left", padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                      <div style={{ width: 34, height: 34, borderRadius: 999, background: claimed ? C.teal : C.muted, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{claimed ? (r.handle ? r.handle.charAt(0).toUpperCase() : "·") : "·"}</div>
                       <div style={{ minWidth: 140, flex: 1 }}>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: C.navy }}>{r.name}</div>
-                        <div style={{ fontSize: 11.5, color: C.muted }}>Cohort {r.cohort} · updated {new Date(r.updated_at).toLocaleString()}</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: claimed ? C.navy : C.muted }}>{title} <span style={{ fontFamily: "Consolas, monospace", fontSize: 12, color: C.muted, fontWeight: 600 }}>· {r.code}</span></div>
+                        <div style={{ fontSize: 11.5, color: C.muted }}>Cohort {r.cohort} · {claimed ? `active ${new Date(r.updated_at).toLocaleString()}` : "not yet used"}</div>
                       </div>
-                      <div style={{ minWidth: 120 }}>
+                      {claimed && <div style={{ minWidth: 120 }}>
                         <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{pct}% · {bl.length} opps</div>
                         <div style={{ height: 6, width: 120, background: C.line, borderRadius: 99, marginTop: 4 }}><div style={{ width: `${pct}%`, height: "100%", background: C.teal, borderRadius: 99 }} /></div>
-                      </div>
-                      <ChevronDown size={17} color={C.muted} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+                      </div>}
+                      {claimed && <ChevronDown size={17} color={C.muted} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />}
                     </button>
-                    {isOpen && (
+                    {isOpen && claimed && (
                       <div style={{ borderTop: `1px solid ${C.line}`, padding: 16, background: C.light }}>
                         <H size={14} style={{ marginBottom: 8 }}>Opportunity backlog ({bl.length})</H>
                         {bl.length === 0 ? <p style={{ color: C.muted, fontSize: 13, margin: "0 0 14px" }}>None captured.</p> : (
@@ -1600,21 +1662,25 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   const commit = (next) => { setProfiles(next); saveProfiles(next); };
-  const onPick = (id) => commit({ ...profiles, active: id });
-  const onAdd = (name, cohort) => {
-    const learnerId = uuid();
-    commit({ active: learnerId, list: [...profiles.list, { learnerId, name, cohort, createdAt: Date.now() }] });
+  const onPick = (code) => commit({ ...profiles, active: code });
+  // claim/sign in a seat returned by the edge function; cache its data locally
+  const onClaim = (seat) => {
+    const prof = { code: seat.code, cohort: seat.cohort, handle: seat.handle || "" };
+    ls.set(dataKey(seat.code), JSON.stringify(seat.data || {}));
+    const exists = profiles.list.some((p) => p.code === seat.code);
+    const list = exists ? profiles.list.map((p) => p.code === seat.code ? prof : p) : [...profiles.list, prof];
+    commit({ active: seat.code, list });
   };
-  const onRemove = (id) => {
-    const list = profiles.list.filter((p) => p.learnerId !== id);
-    commit({ active: profiles.active === id ? (list[0]?.learnerId || null) : profiles.active, list });
+  const onRemove = (code) => {
+    const list = profiles.list.filter((p) => p.code !== code);
+    commit({ active: profiles.active === code ? (list[0]?.code || null) : profiles.active, list });
   };
-  const onRename = (name) => commit({ ...profiles, list: profiles.list.map((p) => p.learnerId === profiles.active ? { ...p, name } : p) });
+  const onRename = (handle) => commit({ ...profiles, list: profiles.list.map((p) => p.code === profiles.active ? { ...p, handle } : p) });
   const openAdmin = () => { window.location.hash = "#admin"; setMode("admin"); };
   const exitAdmin = () => { if (window.location.hash) window.location.hash = ""; setMode("app"); };
 
   if (mode === "admin") return <Admin onExit={exitAdmin} />;
-  const active = profiles.list.find((p) => p.learnerId === profiles.active) || null;
-  if (!active) return <StartGate onCreate={onAdd} openAdmin={openAdmin} />;
-  return <Cockpit learner={active} profiles={profiles.list} onPick={onPick} onAdd={onAdd} onRemove={onRemove} onRename={onRename} openAdmin={openAdmin} />;
+  const active = profiles.list.find((p) => p.code === profiles.active) || null;
+  if (!active) return <StartGate onClaim={onClaim} openAdmin={openAdmin} />;
+  return <Cockpit learner={active} profiles={profiles.list} onPick={onPick} onClaim={onClaim} onRemove={onRemove} onRename={onRename} openAdmin={openAdmin} />;
 }
