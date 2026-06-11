@@ -17,6 +17,10 @@ pnpm-debug.log*
 # vercel
 .vercel
 
+# supabase cli artifacts
+supabase/.temp/
+supabase/.branches/
+
 # env
 .env
 .env.*.local

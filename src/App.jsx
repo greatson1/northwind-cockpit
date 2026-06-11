@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie,
 } from "recharts";
 import {
   Compass, ListChecks, LayoutGrid, Rocket, Home as HomeIcon, Copy, Check,
   Plus, X, AlertTriangle, ChevronRight, Building2,
+  Users, UserPlus, LogOut, Shield, ChevronDown, RefreshCw,
 } from "lucide-react";
 
 /* ---------------- palette & type ---------------- */
@@ -16,24 +17,6 @@ const C = {
 };
 const serif = "Georgia, 'Times New Roman', serif";
 const sans = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
-
-/* ---------------- persistence ----------------
-   Uses the sandbox window.storage API when present, otherwise falls back
-   to browser localStorage so progress persists in a normal deployment. */
-const store = {
-  async get(key) {
-    if (typeof window !== "undefined" && window.storage) return window.storage.get(key);
-    if (typeof localStorage !== "undefined") {
-      const value = localStorage.getItem(key);
-      return value == null ? null : { value };
-    }
-    return null;
-  },
-  async set(key, value) {
-    if (typeof window !== "undefined" && window.storage) return window.storage.set(key, value);
-    if (typeof localStorage !== "undefined") localStorage.setItem(key, value);
-  },
-};
 
 /* ---------------- Northwind data ---------------- */
 const PROFILE = [
@@ -745,6 +728,67 @@ function Home({ go, weekPct, backlogCount, name, setName }) {
   );
 }
 
+/* ================= IDENTITY, STORAGE & SYNC =================
+   Each learner gets a UUID-keyed local profile so several people can share
+   one browser without colliding. Progress is saved to localStorage instantly
+   and mirrored (debounced) to the backend so the instructor dashboard can
+   collect everyone's work. No login — identity is name + cohort code. */
+
+const STORAGE_PREFIX = "cockpit";
+const PROFILES_KEY = `${STORAGE_PREFIX}:profiles`;      // { active, list: [{ learnerId, name, cohort, createdAt }] }
+const dataKey = (id) => `${STORAGE_PREFIX}:v1:${id}`;   // per-learner progress
+
+/* public, build-time config (anon key + url are safe to ship) */
+const SUPA_URL = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
+const SUPA_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+const FN_URL = SUPA_URL ? `${SUPA_URL}/functions/v1/cockpit-sync` : "";
+
+const ls = {
+  get(key) { try { return typeof localStorage !== "undefined" ? localStorage.getItem(key) : null; } catch { return null; } },
+  set(key, val) { try { if (typeof localStorage !== "undefined") localStorage.setItem(key, val); } catch (e) {} },
+};
+const uuid = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+      });
+
+const fnHeaders = () => ({ "Content-Type": "application/json", apikey: SUPA_ANON, Authorization: `Bearer ${SUPA_ANON}` });
+
+/* best-effort remote mirror — the local copy is always the source of truth */
+async function syncSave(learner, data) {
+  if (!FN_URL) return;
+  try {
+    await fetch(FN_URL, {
+      method: "POST", headers: fnHeaders(),
+      body: JSON.stringify({ action: "save", learnerId: learner.learnerId, cohort: learner.cohort, name: learner.name, data }),
+    });
+  } catch (e) { /* offline — will resync on the next change */ }
+}
+async function adminList(cohort, adminKey) {
+  if (!FN_URL) throw new Error("Backend not configured (VITE_SUPABASE_URL is missing).");
+  const res = await fetch(FN_URL, {
+    method: "POST", headers: fnHeaders(),
+    body: JSON.stringify({ action: "list", cohort: cohort || undefined, adminKey }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+  return body.sessions || [];
+}
+
+function loadProfiles() {
+  try {
+    const p = JSON.parse(ls.get(PROFILES_KEY) || "{}");
+    return { active: p.active || null, list: Array.isArray(p.list) ? p.list : [] };
+  } catch { return { active: null, list: [] }; }
+}
+const saveProfiles = (p) => ls.set(PROFILES_KEY, JSON.stringify(p));
+
+/* progress helpers (shared by Cockpit and the dashboard) */
+const pctOf = (done) => Math.round((ALL_ACTIVITIES.filter((id) => done && done[id]).length / ALL_ACTIVITIES.length) * 100);
+
 /* ================= APP SHELL ================= */
 const NAV = [
   { id: "home", label: "Home", icon: HomeIcon },
@@ -753,42 +797,38 @@ const NAV = [
   { id: "backlog", label: "Backlog", icon: LayoutGrid },
   { id: "strategy", label: "My Strategy", icon: Rocket },
 ];
-const KEY = "cockpit:v1";
 
-export default function App() {
+function Cockpit({ learner, profiles, onPick, onAdd, onRemove, onRename, openAdmin }) {
   const [view, setView] = useState("home");
   const [day, setDay] = useState(1);
   const [answers, setAnswers] = useState({});
   const [done, setDone] = useState({});
   const [backlog, setBacklog] = useState([]);
   const [plan, setPlan] = useState("");
-  const [name, setName] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [switcher, setSwitcher] = useState(false);
+  const syncTimer = useRef();
 
+  // load this learner's saved progress whenever the active learner changes
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const r = await store.get(KEY);
-        if (alive && r && r.value) {
-          const d = JSON.parse(r.value);
-          setAnswers(d.answers || {}); setDone(d.done || {});
-          setBacklog(d.backlog || []); setPlan(d.plan || ""); setName(d.name || "");
-        }
-      } catch (e) { /* no saved state yet */ }
-      if (alive) setLoaded(true);
-    })();
-    return () => { alive = false; };
-  }, []);
+    setLoaded(false);
+    let d = {};
+    try { d = JSON.parse(ls.get(dataKey(learner.learnerId)) || "{}"); } catch (e) {}
+    setAnswers(d.answers || {}); setDone(d.done || {});
+    setBacklog(d.backlog || []); setPlan(d.plan || "");
+    setView("home"); setDay(1); setLoaded(true);
+  }, [learner.learnerId]);
 
+  // persist: local immediately, remote debounced
   useEffect(() => {
     if (!loaded) return;
-    (async () => {
-      try {
-        await store.set(KEY, JSON.stringify({ answers, done, backlog, plan, name }));
-      } catch (e) {}
-    })();
-  }, [answers, done, backlog, plan, name, loaded]);
+    const data = { answers, done, backlog, plan };
+    ls.set(dataKey(learner.learnerId), JSON.stringify(data));
+    clearTimeout(syncTimer.current);
+    const snap = { learnerId: learner.learnerId, cohort: learner.cohort, name: learner.name };
+    syncTimer.current = setTimeout(() => syncSave(snap, data), 1200);
+    return () => clearTimeout(syncTimer.current);
+  }, [answers, done, backlog, plan, loaded, learner.learnerId, learner.cohort, learner.name]);
 
   const doneCount = ALL_ACTIVITIES.filter((id) => done[id]).length;
   const weekPct = Math.round((doneCount / ALL_ACTIVITIES.length) * 100);
@@ -796,13 +836,29 @@ export default function App() {
   return (
     <div style={{ fontFamily: sans, background: C.light, minHeight: "100vh", color: C.body, display: "flex" }}>
       {/* rail */}
-      <nav style={{ width: 210, background: "#fff", borderRight: `1px solid ${C.line}`, padding: "20px 14px", position: "sticky", top: 0, height: "100vh", boxSizing: "border-box", flexShrink: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 6px 18px" }}>
+      <nav style={{ width: 210, background: "#fff", borderRight: `1px solid ${C.line}`, padding: "20px 14px", position: "sticky", top: 0, height: "100vh", boxSizing: "border-box", flexShrink: 0, overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 6px 14px" }}>
           <div style={{ width: 30, height: 30, borderRadius: 8, background: C.navy, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Building2 size={17} color={C.gold} />
           </div>
           <div style={{ fontFamily: serif, fontWeight: 700, color: C.navy, fontSize: 15, lineHeight: 1 }}>Northwind<br /><span style={{ fontSize: 11, color: C.muted, fontWeight: 400 }}>Cockpit</span></div>
         </div>
+
+        {/* active-learner chip */}
+        <button onClick={() => setSwitcher(true)}
+          style={{ width: "100%", textAlign: "left", cursor: "pointer", border: `1px solid ${C.line}`, background: C.light,
+            borderRadius: 10, padding: "8px 10px", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 26, height: 26, borderRadius: 999, background: C.teal, color: "#fff", flexShrink: 0,
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700 }}>
+            {(learner.name || "?").trim().charAt(0).toUpperCase() || "?"}
+          </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{learner.name || "Learner"}</div>
+            <div style={{ fontSize: 10.5, color: C.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Cohort {learner.cohort}</div>
+          </div>
+          <ChevronDown size={15} color={C.muted} />
+        </button>
+
         {NAV.map((n) => {
           const Icon = n.icon; const active = view === n.id;
           return (
@@ -825,12 +881,303 @@ export default function App() {
 
       {/* main */}
       <main style={{ flex: 1, padding: "28px clamp(16px, 4vw, 44px)", maxWidth: 1080, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
-        {view === "home" && <Home go={setView} weekPct={weekPct} backlogCount={backlog.length} name={name} setName={setName} />}
+        {view === "home" && <Home go={setView} weekPct={weekPct} backlogCount={backlog.length} name={learner.name} setName={onRename} />}
         {view === "explore" && <Explore />}
         {view === "missions" && <Missions day={day} setDay={setDay} answers={answers} setAnswers={setAnswers} done={done} setDone={setDone} go={setView} />}
         {view === "backlog" && <Backlog backlog={backlog} setBacklog={setBacklog} />}
-        {view === "strategy" && <Strategy backlog={backlog} plan={plan} setPlan={setPlan} name={name} />}
+        {view === "strategy" && <Strategy backlog={backlog} plan={plan} setPlan={setPlan} name={learner.name} />}
       </main>
+
+      {switcher && (
+        <Switcher learner={learner} profiles={profiles} onClose={() => setSwitcher(false)}
+          onPick={(id) => { onPick(id); setSwitcher(false); }}
+          onAdd={(n, c) => { onAdd(n, c); setSwitcher(false); }}
+          onRemove={onRemove} openAdmin={() => { setSwitcher(false); openAdmin(); }} />
+      )}
     </div>
+  );
+}
+
+/* ---- switch / add learner (handles shared computers) ---- */
+function Switcher({ learner, profiles, onClose, onPick, onAdd, onRemove, openAdmin }) {
+  const [adding, setAdding] = useState(profiles.length === 0);
+  const [name, setName] = useState("");
+  const [cohort, setCohort] = useState(learner ? learner.cohort : "");
+  const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 14, padding: "9px 11px", border: `1px solid ${C.line}`, borderRadius: 9, color: C.ink, background: "#fff" };
+  const submit = () => { if (name.trim() && cohort.trim()) onAdd(name.trim(), cohort.trim()); };
+
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,37,69,0.4)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(440px,100%)", background: "#fff", borderRadius: 16, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <H size={19}>Who's working?</H>
+          <button onClick={onClose} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted }}><X size={20} /></button>
+        </div>
+
+        {profiles.length > 0 && (
+          <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+            {profiles.map((p) => {
+              const active = learner && p.learnerId === learner.learnerId;
+              return (
+                <div key={p.learnerId} style={{ display: "flex", alignItems: "center", gap: 10, border: `1px solid ${active ? C.teal : C.line}`, background: active ? C.cardl : "#fff", borderRadius: 10, padding: "8px 10px" }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 999, background: active ? C.teal : C.muted, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700 }}>{(p.name || "?").charAt(0).toUpperCase()}</div>
+                  <button onClick={() => onPick(p.learnerId)} style={{ flex: 1, textAlign: "left", border: "none", background: "none", cursor: "pointer", minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>{p.name}{active ? " · active" : ""}</div>
+                    <div style={{ fontSize: 11.5, color: C.muted }}>Cohort {p.cohort}</div>
+                  </button>
+                  <button title="Remove from this device" onClick={() => onRemove(p.learnerId)} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted }}><X size={15} /></button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {adding ? (
+          <div style={{ display: "grid", gap: 10, borderTop: `1px solid ${C.line}`, paddingTop: 14 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700, color: C.muted }}>NEW LEARNER</div>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" style={inp} />
+            <input value={cohort} onChange={(e) => setCohort(e.target.value)} placeholder="Cohort / join code" style={inp} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <Btn onClick={submit}><UserPlus size={15} />Create</Btn>
+              {profiles.length > 0 && <Btn kind="ghost" onClick={() => setAdding(false)}>Cancel</Btn>}
+            </div>
+          </div>
+        ) : (
+          <Btn kind="ghost" onClick={() => { setName(""); setCohort(learner ? learner.cohort : ""); setAdding(true); }}><Plus size={15} />Add another learner</Btn>
+        )}
+
+        <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+          <button onClick={openAdmin} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted, fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, fontFamily: sans }}>
+            <Shield size={14} /> Instructor dashboard
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---- first-run welcome / identity gate ---- */
+function StartGate({ onCreate, openAdmin }) {
+  const [name, setName] = useState("");
+  const [cohort, setCohort] = useState("");
+  const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 15, padding: "11px 13px", border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, background: "#fff", marginTop: 6 };
+  const go = () => { if (name.trim() && cohort.trim()) onCreate(name.trim(), cohort.trim()); };
+
+  return (
+    <div style={{ fontFamily: sans, minHeight: "100vh", background: `linear-gradient(135deg, ${C.navy}, ${C.deep})`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "min(460px,100%)", background: "#fff", borderRadius: 18, padding: "30px 28px", boxShadow: "0 24px 70px rgba(0,0,0,0.35)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 10, background: C.navy, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Building2 size={21} color={C.gold} />
+          </div>
+          <div>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 1.2, color: C.amber }}>AI FOUNDATIONS · PROCUREMENT & SUPPLY CHAIN</div>
+            <div style={{ fontFamily: serif, fontSize: 20, fontWeight: 700, color: C.navy, lineHeight: 1.1 }}>The Northwind Cockpit</div>
+          </div>
+        </div>
+        <p style={{ color: C.body, fontSize: 14, lineHeight: 1.55, margin: "0 0 18px" }}>
+          Enter your name and the cohort code from your facilitator to start. Your progress saves on this device and to your cohort.
+        </p>
+        <label style={{ fontSize: 12.5, fontWeight: 700, color: C.muted }}>Your name
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Alex Morgan" style={inp}
+            onKeyDown={(e) => e.key === "Enter" && go()} />
+        </label>
+        <label style={{ fontSize: 12.5, fontWeight: 700, color: C.muted, display: "block", marginTop: 14 }}>Cohort / join code
+          <input value={cohort} onChange={(e) => setCohort(e.target.value)} placeholder="e.g. JUN-2026" style={inp}
+            onKeyDown={(e) => e.key === "Enter" && go()} />
+        </label>
+        <div style={{ marginTop: 20 }}>
+          <Btn kind="navy" onClick={go} style={{ width: "100%", justifyContent: "center", opacity: name.trim() && cohort.trim() ? 1 : 0.5 }}>
+            Enter the Cockpit <ChevronRight size={16} />
+          </Btn>
+        </div>
+        <div style={{ marginTop: 16, textAlign: "center" }}>
+          <button onClick={openAdmin} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted, fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: sans }}>
+            <Shield size={14} /> Instructor dashboard
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= INSTRUCTOR DASHBOARD ================= */
+function Admin({ onExit }) {
+  const [cohort, setCohort] = useState("");
+  const [key, setKey] = useState("");
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(null);
+
+  const inp = { fontFamily: sans, fontSize: 14, padding: "9px 11px", border: `1px solid ${C.line}`, borderRadius: 9, color: C.ink, background: "#fff" };
+
+  const run = async () => {
+    setBusy(true); setErr("");
+    try { setRows(await adminList(cohort.trim(), key.trim())); }
+    catch (e) { setErr(e.message || "Failed to load"); setRows(null); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div style={{ fontFamily: sans, background: C.light, minHeight: "100vh", color: C.body }}>
+      <div style={{ background: `linear-gradient(135deg, ${C.navy}, ${C.deep})`, color: "#fff", padding: "20px clamp(16px,4vw,44px)" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Shield size={20} color={C.gold} />
+            <div>
+              <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 1, color: C.amber }}>NORTHWIND COCKPIT</div>
+              <div style={{ fontFamily: serif, fontSize: 20, fontWeight: 700 }}>Instructor dashboard</div>
+            </div>
+          </div>
+          <Btn kind="ghost" onClick={onExit} style={{ color: "#fff", borderColor: "rgba(255,255,255,0.4)" }}><LogOut size={15} />Back to app</Btn>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px clamp(16px,4vw,44px)" }}>
+        <Card style={{ marginBottom: 18 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Cohort code <span style={{ fontWeight: 400 }}>(blank = all)</span><br />
+              <input value={cohort} onChange={(e) => setCohort(e.target.value)} placeholder="e.g. JUN-2026" style={{ ...inp, marginTop: 5 }} onKeyDown={(e) => e.key === "Enter" && run()} /></label>
+            <label style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Admin passphrase<br />
+              <input value={key} onChange={(e) => setKey(e.target.value)} type="password" placeholder="passphrase" style={{ ...inp, marginTop: 5 }} onKeyDown={(e) => e.key === "Enter" && run()} /></label>
+            <Btn kind="navy" onClick={run} style={{ opacity: key.trim() ? 1 : 0.5 }}><RefreshCw size={15} />{busy ? "Loading…" : "Load cohort"}</Btn>
+          </div>
+          {err && <p style={{ color: C.amber, fontSize: 13, marginTop: 10, marginBottom: 0 }}>⚠ {err}</p>}
+        </Card>
+
+        {rows && (
+          <div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 16 }}>
+              <Stat label="LEARNERS" value={rows.length} />
+              <Stat label="AVG PROGRESS" value={`${rows.length ? Math.round(rows.reduce((a, r) => a + pctOf(r.data?.done), 0) / rows.length) : 0}%`} />
+              <Stat label="OPPORTUNITIES" value={rows.reduce((a, r) => a + (r.data?.backlog?.length || 0), 0)} />
+              <Stat label="PLANS WRITTEN" value={rows.filter((r) => (r.data?.plan || "").trim()).length} />
+            </div>
+
+            {rows.length === 0 && <Card><p style={{ margin: 0, color: C.muted }}>No sessions yet for this cohort.</p></Card>}
+
+            <div style={{ display: "grid", gap: 10 }}>
+              {rows.map((r) => {
+                const pct = pctOf(r.data?.done);
+                const bl = r.data?.backlog || [];
+                const isOpen = open === r.learner_id;
+                return (
+                  <Card key={r.learner_id} style={{ padding: 0, overflow: "hidden" }}>
+                    <button onClick={() => setOpen(isOpen ? null : r.learner_id)}
+                      style={{ width: "100%", border: "none", background: "none", cursor: "pointer", textAlign: "left", padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                      <div style={{ width: 34, height: 34, borderRadius: 999, background: C.teal, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{(r.name || "?").charAt(0).toUpperCase()}</div>
+                      <div style={{ minWidth: 140, flex: 1 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: C.navy }}>{r.name}</div>
+                        <div style={{ fontSize: 11.5, color: C.muted }}>Cohort {r.cohort} · updated {new Date(r.updated_at).toLocaleString()}</div>
+                      </div>
+                      <div style={{ minWidth: 120 }}>
+                        <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{pct}% · {bl.length} opps</div>
+                        <div style={{ height: 6, width: 120, background: C.line, borderRadius: 99, marginTop: 4 }}>
+                          <div style={{ width: `${pct}%`, height: "100%", background: C.teal, borderRadius: 99 }} />
+                        </div>
+                      </div>
+                      <ChevronDown size={17} color={C.muted} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />
+                    </button>
+
+                    {isOpen && (
+                      <div style={{ borderTop: `1px solid ${C.line}`, padding: 16, background: C.light }}>
+                        <H size={14} style={{ marginBottom: 8 }}>Opportunity backlog ({bl.length})</H>
+                        {bl.length === 0 ? <p style={{ color: C.muted, fontSize: 13, margin: "0 0 14px" }}>None captured.</p> : (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+                            {bl.map((b) => (
+                              <span key={b.id} style={{ fontSize: 12.5, background: "#fff", border: `1px solid ${C.line}`, borderLeft: `3px solid ${GOAL_COLOR[b.goal] || C.teal}`, borderRadius: 7, padding: "5px 9px", color: C.ink }}>
+                                {b.title} <span style={{ color: C.muted }}>· {b.value}/{b.readiness}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <H size={14} style={{ marginBottom: 8 }}>90-day plan</H>
+                        <p style={{ whiteSpace: "pre-wrap", fontSize: 13.5, color: (r.data?.plan || "").trim() ? C.ink : C.muted, margin: "0 0 14px", background: "#fff", border: `1px solid ${C.line}`, borderRadius: 8, padding: 10 }}>
+                          {(r.data?.plan || "").trim() || "— not written yet —"}
+                        </p>
+
+                        <H size={14} style={{ marginBottom: 8 }}>Mission notes</H>
+                        {(() => {
+                          const ans = r.data?.answers || {};
+                          const filled = Object.entries(ans).filter(([, v]) => (v || "").trim());
+                          if (filled.length === 0) return <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>No notes yet.</p>;
+                          return (
+                            <div style={{ display: "grid", gap: 8 }}>
+                              {filled.map(([id, v]) => (
+                                <div key={id} style={{ background: "#fff", border: `1px solid ${C.line}`, borderRadius: 8, padding: 10 }}>
+                                  <div style={{ fontSize: 11, color: C.muted, fontWeight: 700 }}>{actLabel(id)}</div>
+                                  <div style={{ fontSize: 13.5, color: C.ink, whiteSpace: "pre-wrap", marginTop: 3 }}>{v}</div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+function Stat({ label, value }) {
+  return (
+    <Card style={{ padding: 14 }}>
+      <div style={{ fontSize: 11, color: C.muted, fontWeight: 700 }}>{label}</div>
+      <div style={{ fontFamily: serif, fontSize: 28, color: C.navy, fontWeight: 700 }}>{value}</div>
+    </Card>
+  );
+}
+/* turn "d2-1" into "Day 2 · <activity title>" for the dashboard */
+function actLabel(id) {
+  const m = /^d(\d+)-(\d+)$/.exec(id);
+  if (!m) return id;
+  const d = DAYS[+m[1] - 1];
+  const a = d && d.activities[+m[2]];
+  return a ? `Day ${m[1]} · ${a.title}` : `Day ${m[1]} · activity ${+m[2] + 1}`;
+}
+
+/* ================= ROOT ================= */
+export default function App() {
+  const [profiles, setProfiles] = useState(loadProfiles);
+  const [mode, setMode] = useState(() => (typeof window !== "undefined" && window.location.hash === "#admin") ? "admin" : "app");
+
+  useEffect(() => {
+    const onHash = () => setMode(window.location.hash === "#admin" ? "admin" : "app");
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const commit = (next) => { setProfiles(next); saveProfiles(next); };
+  const onPick = (id) => commit({ ...profiles, active: id });
+  const onAdd = (name, cohort) => {
+    const learnerId = uuid();
+    commit({ active: learnerId, list: [...profiles.list, { learnerId, name, cohort, createdAt: Date.now() }] });
+  };
+  const onRemove = (id) => {
+    const list = profiles.list.filter((p) => p.learnerId !== id);
+    commit({ active: profiles.active === id ? (list[0]?.learnerId || null) : profiles.active, list });
+  };
+  const onRename = (name) => {
+    commit({ ...profiles, list: profiles.list.map((p) => p.learnerId === profiles.active ? { ...p, name } : p) });
+  };
+
+  const openAdmin = () => { window.location.hash = "#admin"; setMode("admin"); };
+  const exitAdmin = () => { if (window.location.hash) window.location.hash = ""; setMode("app"); };
+
+  if (mode === "admin") return <Admin onExit={exitAdmin} />;
+
+  const active = profiles.list.find((p) => p.learnerId === profiles.active) || null;
+  if (!active) return <StartGate onCreate={onAdd} openAdmin={openAdmin} />;
+
+  return (
+    <Cockpit learner={active} profiles={profiles.list} onPick={onPick} onAdd={onAdd}
+      onRemove={onRemove} onRename={onRename} openAdmin={openAdmin} />
   );
 }
