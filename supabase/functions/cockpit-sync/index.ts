@@ -35,6 +35,16 @@ const db = createClient(
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Optional write-key gate. If ALLOWED_COHORTS is set (comma-separated), only
+// those cohort codes may write — turning the cohort code into a shared key.
+// If unset/empty, saves are open (backward compatible). Case-insensitive.
+function cohortGate(cohort: unknown) {
+  const list = (Deno.env.get("ALLOWED_COHORTS") || "")
+    .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (list.length === 0) return { enforced: false, allowed: true };
+  return { enforced: true, allowed: list.includes(String(cohort ?? "").trim().toLowerCase()) };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
@@ -53,6 +63,9 @@ Deno.serve(async (req) => {
     if (!learnerId || !UUID_RE.test(String(learnerId))) return json({ error: "bad learnerId" }, 400);
     if (!cohort || !String(cohort).trim()) return json({ error: "cohort required" }, 400);
     if (!name || !String(name).trim()) return json({ error: "name required" }, 400);
+
+    const gate = cohortGate(cohort);
+    if (gate.enforced && !gate.allowed) return json({ error: "cohort not recognised" }, 403);
 
     const { error } = await db
       .from("cockpit_sessions")
@@ -88,6 +101,11 @@ Deno.serve(async (req) => {
     const { data: rows, error } = await q;
     if (error) return json({ error: error.message }, 500);
     return json({ ok: true, sessions: rows ?? [] });
+  }
+
+  // public: check whether a cohort code is accepted for writing (used at sign-in)
+  if (action === "verify") {
+    return json({ ok: true, ...cohortGate(payload?.cohort) });
   }
 
   return json({ error: "unknown action" }, 400);

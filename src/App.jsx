@@ -1245,6 +1245,18 @@ async function adminList(cohort, adminKey) {
   if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
   return body.sessions || [];
 }
+// Check a cohort code at sign-in. Fails OPEN: if the backend is unconfigured or
+// unreachable, we never block the learner — the app still works local-only.
+async function verifyCohort(cohort) {
+  if (!FN_URL) return { allowed: true, enforced: false };
+  try {
+    const res = await fetch(FN_URL, { method: "POST", headers: fnHeaders(), body: JSON.stringify({ action: "verify", cohort }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return { allowed: true, enforced: false };
+    return { allowed: body.allowed !== false, enforced: !!body.enforced };
+  } catch (e) { return { allowed: true, enforced: false }; }
+}
+const COHORT_ERR = "That cohort code isn't recognised. Check it with your facilitator.";
 function loadProfiles() {
   try { const p = JSON.parse(ls.get(PROFILES_KEY) || "{}"); return { active: p.active || null, list: Array.isArray(p.list) ? p.list : [] }; }
   catch { return { active: null, list: [] }; }
@@ -1348,8 +1360,17 @@ function Switcher({ learner, profiles, onClose, onPick, onAdd, onRemove, openAdm
   const [adding, setAdding] = useState(profiles.length === 0);
   const [name, setName] = useState("");
   const [cohort, setCohort] = useState(learner ? learner.cohort : "");
+  const [checking, setChecking] = useState(false);
+  const [err, setErr] = useState("");
   const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 14, padding: "9px 11px", border: `1px solid ${C.line}`, borderRadius: 9, color: C.ink, background: "#fff" };
-  const submit = () => { if (name.trim() && cohort.trim()) onAdd(name.trim(), cohort.trim()); };
+  const submit = async () => {
+    if (!(name.trim() && cohort.trim()) || checking) return;
+    setChecking(true); setErr("");
+    const v = await verifyCohort(cohort.trim());
+    setChecking(false);
+    if (v.enforced && !v.allowed) { setErr(COHORT_ERR); return; }
+    onAdd(name.trim(), cohort.trim());
+  };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,37,69,0.4)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "min(440px,100%)", background: "#fff", borderRadius: 16, padding: 22, boxShadow: "0 20px 60px rgba(0,0,0,0.25)", maxHeight: "85vh", overflowY: "auto" }}>
@@ -1378,9 +1399,10 @@ function Switcher({ learner, profiles, onClose, onPick, onAdd, onRemove, openAdm
           <div style={{ display: "grid", gap: 10, borderTop: `1px solid ${C.line}`, paddingTop: 14 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: C.muted }}>NEW LEARNER</div>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" style={inp} />
-            <input value={cohort} onChange={(e) => setCohort(e.target.value)} placeholder="Cohort / join code" style={inp} />
+            <input value={cohort} onChange={(e) => { setCohort(e.target.value); setErr(""); }} placeholder="Cohort / join code" style={inp} />
+            {err && <p style={{ color: C.red, fontSize: 12.5, margin: 0 }}>⚠ {err}</p>}
             <div style={{ display: "flex", gap: 8 }}>
-              <Btn onClick={submit}><UserPlus size={15} />Create</Btn>
+              <Btn onClick={submit} disabled={checking}><UserPlus size={15} />{checking ? "Checking…" : "Create"}</Btn>
               {profiles.length > 0 && <Btn kind="ghost" onClick={() => setAdding(false)}>Cancel</Btn>}
             </div>
           </div>
@@ -1400,8 +1422,17 @@ function Switcher({ learner, profiles, onClose, onPick, onAdd, onRemove, openAdm
 function StartGate({ onCreate, openAdmin }) {
   const [name, setName] = useState("");
   const [cohort, setCohort] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [err, setErr] = useState("");
   const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 15, padding: "11px 13px", border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, background: "#fff", marginTop: 6 };
-  const go = () => { if (name.trim() && cohort.trim()) onCreate(name.trim(), cohort.trim()); };
+  const go = async () => {
+    if (!(name.trim() && cohort.trim()) || checking) return;
+    setChecking(true); setErr("");
+    const v = await verifyCohort(cohort.trim());
+    setChecking(false);
+    if (v.enforced && !v.allowed) { setErr(COHORT_ERR); return; }
+    onCreate(name.trim(), cohort.trim());
+  };
   return (
     <div style={{ fontFamily: sans, minHeight: "100vh", background: `linear-gradient(135deg, ${C.navy}, ${C.deep})`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ width: "min(460px,100%)", background: "#fff", borderRadius: 18, padding: "30px 28px", boxShadow: "0 24px 70px rgba(0,0,0,0.35)" }}>
@@ -1417,10 +1448,11 @@ function StartGate({ onCreate, openAdmin }) {
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Alex Morgan" style={inp} onKeyDown={(e) => e.key === "Enter" && go()} />
         </label>
         <label style={{ fontSize: 12.5, fontWeight: 700, color: C.muted, display: "block", marginTop: 14 }}>Cohort / join code
-          <input value={cohort} onChange={(e) => setCohort(e.target.value)} placeholder="e.g. JUN-2026" style={inp} onKeyDown={(e) => e.key === "Enter" && go()} />
+          <input value={cohort} onChange={(e) => { setCohort(e.target.value); setErr(""); }} placeholder="e.g. JUN-2026" style={inp} onKeyDown={(e) => e.key === "Enter" && go()} />
         </label>
+        {err && <p style={{ color: C.red, fontSize: 13, margin: "10px 0 0" }}>⚠ {err}</p>}
         <div style={{ marginTop: 20 }}>
-          <Btn kind="navy" onClick={go} disabled={!(name.trim() && cohort.trim())} style={{ width: "100%", justifyContent: "center" }}>Enter the Cockpit <ChevronRight size={16} /></Btn>
+          <Btn kind="navy" onClick={go} disabled={!(name.trim() && cohort.trim()) || checking} style={{ width: "100%", justifyContent: "center" }}>{checking ? "Checking…" : "Enter the Cockpit"} {!checking && <ChevronRight size={16} />}</Btn>
         </div>
         <div style={{ marginTop: 16, textAlign: "center" }}>
           <button onClick={openAdmin} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted, fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: sans }}>
