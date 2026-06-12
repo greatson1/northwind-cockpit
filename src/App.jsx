@@ -1010,109 +1010,180 @@ function Missions({ day, setDay, answers, setAnswers, done, setDone, work, setWo
   );
 }
 
-/* ================= LIVE AI ANALYST · BEAT THE AI ================= */
+/* ================= LIVE AI ANALYST (all five days) ================= */
 const RISK_SET = ["Helios Components", "Meridian Steel", "Castore Logistics", "Verdant Polymers", "Atlas Freight", "Aurora Electronics", "Sahara Cables"];
 const riskBand = (n) => (n >= 80 ? C.amber : n >= 60 ? C.teal : C.mint);
+const valBand = (n) => (n >= 70 ? C.teal : n >= 45 ? C.mint : C.muted);
+const CONTRACT_PICKS = [
+  { value: "C-1001", label: "C-1001 · Helios" }, { value: "C-1002", label: "C-1002 · Meridian" },
+  { value: "C-1003", label: "C-1003 · Castore" }, { value: "C-1044", label: "C-1044 · Aurora" },
+  { value: "C-1071", label: "C-1071 · Verdant" }, { value: "C-2003", label: "C-2003 · Sahara" },
+  { value: "C-3001", label: "C-3001 · Summit" },
+];
+const PHASE_COLOR = { "Foundations": C.deep, "Quick wins": C.mint, "Scale": C.teal, "Transform": C.amber };
+const shortName = (v) => { v = String(v); return v.length <= 15 ? v : v.slice(0, 14) + "…"; };
 
-function BeatTheAI({ code }) {
+const AI_DAYS = [
+  { n: 1, kind: "opportunity-map", tab: "Day 1", title: "AI Opportunity Map",
+    blurb: "Watch the AI scan Northwind and propose where AI could help — each idea labelled automate or augment and scored by value.",
+    arr: "items", nameKey: "title", nameLabel: "Opportunity", scoreKey: "value", scoreLabel: "Value", band: valBand,
+    cols: [{ key: "type", label: "Type" }, { key: "goal", label: "Goal" }, { key: "ease", label: "Ease", align: "right" }], pick: null },
+  { n: 2, kind: "supplier-risk", tab: "Day 2", title: "Supplier Risk",
+    blurb: "Back your judgement first, then watch the AI rank Northwind's suppliers by supply risk and see how you compare.",
+    arr: "suppliers", nameKey: "name", nameLabel: "Supplier", scoreKey: "risk", scoreLabel: "Risk", band: riskBand,
+    cols: [{ key: "driver", label: "Main driver" }, { key: "mitigation", label: "Mitigation" }],
+    pick: { n: 3, prompt: "Which 3 suppliers carry the highest supply risk?", items: RISK_SET.map((s) => ({ value: s, label: s })), top: (r) => (r.suppliers || []).slice(0, 3).map((s) => s.name) } },
+  { n: 3, kind: "contract-risk", tab: "Day 3", title: "Contract Risk",
+    blurb: "Pick the contracts you'd act on first, then see the AI's triage of the portfolio by risk and urgency.",
+    arr: "contracts", nameKey: "ref", nameLabel: "Contract", scoreKey: "risk", scoreLabel: "Risk", band: riskBand,
+    cols: [{ key: "supplier", label: "Supplier" }, { key: "issue", label: "Issue" }, { key: "action", label: "Next action" }],
+    pick: { n: 2, prompt: "Which 2 contracts would you act on first?", items: CONTRACT_PICKS, top: (r) => (r.contracts || []).slice(0, 2).map((c) => c.ref) } },
+  { n: 4, kind: "logistics-gains", tab: "Day 4", title: "Logistics Gains",
+    blurb: "Watch the AI find the highest-payback logistics improvements, with their effect on cost, service and carbon.",
+    arr: "improvements", nameKey: "title", nameLabel: "Improvement", scoreKey: "payback", scoreLabel: "Payback", band: valBand,
+    cols: [{ key: "cost", label: "Cost" }, { key: "service", label: "Service" }, { key: "carbon", label: "Carbon" }], pick: null },
+  { n: 5, kind: "roadmap", tab: "Day 5", title: "Strategy Roadmap",
+    blurb: "The AI turns YOUR Opportunity Backlog into a phased roadmap, live. Add items in the Backlog first for a richer result.",
+    roadmap: true, pick: null },
+];
+
+function AiAnalyst({ code, backlog }) {
+  const [dayN, setDayN] = useState(2);
+  const cfg = AI_DAYS.find((d) => d.n === dayN);
   const [picks, setPicks] = useState([]);
-  const [phase, setPhase] = useState("guess"); // guess | loading | result
+  const [phase, setPhase] = useState("intro"); // intro | loading | result
   const [result, setResult] = useState(null);
   const [err, setErr] = useState("");
-  const toggle = (s) => {
-    if (phase !== "guess") return;
-    setPicks((p) => (p.includes(s) ? p.filter((x) => x !== s) : p.length < 3 ? [...p, s] : p));
+
+  useEffect(() => { setPicks([]); setPhase("intro"); setResult(null); setErr(""); }, [dayN]);
+
+  const togglePick = (v) => {
+    if (phase === "result" || !cfg.pick) return;
+    setPicks((p) => (p.includes(v) ? p.filter((x) => x !== v) : p.length < cfg.pick.n ? [...p, v] : p));
   };
-  const reveal = async () => {
+  const run = async () => {
     setPhase("loading"); setErr("");
-    const r = await apiAnalyze("supplier-risk", code);
-    if (!r.ok) { setErr(r.error || "The AI couldn't run."); setPhase(result ? "result" : "guess"); return; }
+    const extra = cfg.kind === "roadmap" ? { backlog } : undefined;
+    const r = await apiAnalyze(cfg.kind, code, extra);
+    if (!r.ok || !r.result) { setErr(r.error || "The AI couldn't run."); setPhase(result ? "result" : "intro"); return; }
     setResult(r.result); setPhase("result");
   };
-  const reset = () => { setPicks([]); setResult(null); setErr(""); setPhase("guess"); };
-  const aiTop3 = result ? result.suppliers.slice(0, 3).map((s) => s.name) : [];
-  const matched = picks.filter((p) => aiTop3.includes(p)).length;
-  const chartData = result ? result.suppliers.map((s) => ({ name: s.name.split(" ")[0], full: s.name, risk: s.risk })) : [];
+  const canRun = !cfg.pick || picks.length === cfg.pick.n;
+  const aiTop = cfg.pick && result ? cfg.pick.top(result) : [];
+  const matched = cfg.pick ? picks.filter((p) => aiTop.includes(p)).length : 0;
+  const arr = result && !cfg.roadmap ? result[cfg.arr] || [] : [];
+  const chartData = arr.map((x) => ({ name: shortName(x[cfg.nameKey]), full: String(x[cfg.nameKey]), score: Number(x[cfg.scoreKey]) || 0 }));
 
   return (
     <Card style={{ marginBottom: 18, borderTop: `4px solid ${C.amber}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}><Cpu size={19} color={C.amber} /><H size={18}>Live AI Analyst</H></div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        {AI_DAYS.map((d) => (
+          <button key={d.n} onClick={() => setDayN(d.n)}
+            style={{ fontFamily: sans, fontSize: 12.5, fontWeight: 700, padding: "6px 12px", borderRadius: 999, cursor: "pointer",
+              border: `1px solid ${dayN === d.n ? C.teal : C.line}`, background: dayN === d.n ? C.teal : "#fff", color: dayN === d.n ? "#fff" : C.body }}>{d.tab}</button>
+        ))}
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Cpu size={19} color={C.amber} /><H size={18}>Live AI Analyst — Beat the AI</H></div>
-        <Pill bg={C.deep} fg="#fff">Day 2 · Supplier risk</Pill>
+        <H size={17}>{cfg.title}</H>
+        <Pill bg={C.deep} fg="#fff">{cfg.tab}</Pill>
       </div>
-      <p style={{ color: C.body, fontSize: 14, lineHeight: 1.55, margin: "8px 0 12px" }}>
-        Back your judgement first: which <strong>3 suppliers</strong> carry the highest supply risk? Pick three, then watch a live AI analyse Northwind's base and see how you compare.
-      </p>
+      <p style={{ color: C.body, fontSize: 14, lineHeight: 1.55, margin: "8px 0 12px" }}>{cfg.blurb}</p>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 8, marginBottom: 12 }}>
-        {RISK_SET.map((s) => {
-          const sel = picks.includes(s);
-          const inTop = phase === "result" && aiTop3.includes(s);
-          return (
-            <button key={s} onClick={() => toggle(s)} disabled={phase !== "guess"}
-              style={{ cursor: phase === "guess" ? "pointer" : "default", textAlign: "left", fontFamily: sans, fontSize: 13, fontWeight: 600,
-                padding: "9px 11px", borderRadius: 9, display: "flex", alignItems: "center", gap: 8,
-                border: `1px solid ${sel ? C.teal : inTop ? C.amber : C.line}`, background: sel ? C.cardl : inTop ? "#FDF1E7" : "#fff", color: C.ink }}>
-              {sel ? <CheckCircle2 size={15} color={C.teal} /> : <Circle size={15} color={C.muted} />}
-              <span style={{ flex: 1 }}>{s}</span>
-              {inTop && <span style={{ fontSize: 10.5, fontWeight: 700, color: C.amber }}>AI top 3</span>}
-            </button>
-          );
-        })}
-      </div>
+      {cfg.pick && phase !== "result" && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.navy, marginBottom: 8 }}>{cfg.pick.prompt}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8 }}>
+            {cfg.pick.items.map((it) => {
+              const sel = picks.includes(it.value);
+              return (
+                <button key={it.value} onClick={() => togglePick(it.value)} disabled={phase === "loading"}
+                  style={{ cursor: phase === "loading" ? "default" : "pointer", textAlign: "left", fontFamily: sans, fontSize: 13, fontWeight: 600,
+                    padding: "9px 11px", borderRadius: 9, display: "flex", alignItems: "center", gap: 8,
+                    border: `1px solid ${sel ? C.teal : C.line}`, background: sel ? C.cardl : "#fff", color: C.ink }}>
+                  {sel ? <CheckCircle2 size={15} color={C.teal} /> : <Circle size={15} color={C.muted} />}<span style={{ flex: 1 }}>{it.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-      {phase === "guess" && (
+      {phase !== "loading" && phase !== "result" && (
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <Btn onClick={reveal} disabled={picks.length !== 3}><Sparkles size={15} />Reveal the AI's analysis</Btn>
-          <span style={{ fontSize: 12.5, color: C.muted }}>{picks.length}/3 picked</span>
+          <Btn onClick={run} disabled={!canRun}><Sparkles size={15} />{cfg.pick ? "Reveal the AI's analysis" : "Run the AI analysis"}</Btn>
+          {cfg.pick && <span style={{ fontSize: 12.5, color: C.muted }}>{picks.length}/{cfg.pick.n} picked</span>}
+          {cfg.roadmap && <span style={{ fontSize: 12.5, color: C.muted }}>{(backlog || []).length} backlog item{(backlog || []).length === 1 ? "" : "s"}</span>}
         </div>
       )}
       {phase === "loading" && (
         <div style={{ display: "flex", alignItems: "center", gap: 10, color: C.deep, fontSize: 14, fontWeight: 600, padding: "6px 0" }}>
-          <RefreshCw size={17} style={{ animation: "spin 1s linear infinite" }} /> The AI is analysing Northwind's supplier base…
+          <RefreshCw size={17} style={{ animation: "spin 1s linear infinite" }} /> The AI is analysing the Northwind case…
         </div>
       )}
       {err && <p style={{ color: C.red, fontSize: 13, marginTop: 8 }}>⚠ {err}</p>}
 
       {phase === "result" && result && (
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, background: matched >= 2 ? C.greenl : C.cardl, border: `1px solid ${matched >= 2 ? C.mint : C.line}`, borderRadius: 10, padding: "10px 14px", margin: "6px 0 14px" }}>
-            <Trophy size={18} color={matched >= 2 ? C.green : C.teal} />
-            <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>You matched {matched} of the AI's top 3 — {matched === 3 ? "perfect read!" : matched === 2 ? "strong instincts." : matched === 1 ? "one in common." : "the AI sees it differently."}</span>
-          </div>
+          {cfg.pick && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, background: matched >= Math.ceil(cfg.pick.n / 2) ? C.greenl : C.cardl, border: `1px solid ${matched >= Math.ceil(cfg.pick.n / 2) ? C.mint : C.line}`, borderRadius: 10, padding: "10px 14px", margin: "6px 0 14px" }}>
+              <Trophy size={18} color={matched >= Math.ceil(cfg.pick.n / 2) ? C.green : C.teal} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>You matched {matched} of the AI's top {cfg.pick.n} — {matched === cfg.pick.n ? "perfect read!" : matched === 0 ? "the AI sees it differently." : "good instincts."}</span>
+            </div>
+          )}
 
           <div style={{ background: C.navy, color: "#fff", borderRadius: 10, padding: "12px 14px", fontSize: 13.5, lineHeight: 1.55, marginBottom: 14 }}>
             <span style={{ color: C.gold, fontWeight: 700, fontSize: 11, letterSpacing: 1 }}>AI EXECUTIVE SUMMARY</span><br />{result.narrative}
           </div>
 
-          <H size={15} style={{ marginBottom: 6 }}>Risk ranking (AI-scored 0–100)</H>
-          <div style={{ height: Math.max(180, chartData.length * 34) }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 24 }}>
-                <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: C.muted }} />
-                <YAxis type="category" dataKey="name" width={72} tick={{ fontSize: 11, fill: C.body }} />
-                <Tooltip formatter={(v) => [`${v}/100`, "Risk"]} labelFormatter={(l, p) => (p && p[0] ? p[0].payload.full : l)} />
-                <Bar dataKey="risk" radius={[0, 4, 4, 0]}>
-                  {chartData.map((d, i) => <Cell key={i} fill={riskBand(d.risk)} stroke={picks.includes(d.full) ? C.navy : "none"} strokeWidth={picks.includes(d.full) ? 2 : 0} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <p style={{ fontSize: 11.5, color: C.muted, margin: "2px 0 14px" }}>Bars outlined in navy are your picks. Colour = risk band (amber high · teal medium · mint lower).</p>
-
-          <Table cols={[
-            { key: "name", label: "Supplier", render: (r) => <strong style={{ color: C.navy }}>{r.name}{picks.includes(r.name) ? " ●" : ""}</strong> },
-            { key: "risk", label: "Risk", align: "right", render: (r) => <Pill bg={riskBand(r.risk)} fg="#fff">{r.risk}</Pill> },
-            { key: "driver", label: "Main driver" },
-            { key: "mitigation", label: "Mitigation" },
-          ]} rows={result.suppliers} />
+          {cfg.roadmap ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              {(result.phases || []).map((ph, pi) => (
+                <Card key={pi} style={{ borderLeft: `4px solid ${PHASE_COLOR[ph.phase] || C.teal}`, padding: 14 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: (ph.items || []).length ? 8 : 0 }}>
+                    <H size={16}>{ph.phase}</H><Pill bg={PHASE_COLOR[ph.phase] || C.teal} fg="#fff">{(ph.items || []).length}</Pill>
+                  </div>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {(ph.items || []).map((it, i) => (
+                      <div key={i} style={{ fontSize: 13, color: C.ink, background: C.light, border: `1px solid ${C.line}`, borderRadius: 8, padding: "7px 10px" }}>
+                        <strong style={{ color: C.navy }}>{it.title}</strong>{it.why ? <span style={{ color: C.muted }}> — {it.why}</span> : null}
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <div>
+              <H size={15} style={{ marginBottom: 6 }}>{cfg.scoreLabel} ranking (AI-scored 0–100)</H>
+              <div style={{ height: Math.max(180, chartData.length * 32) }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 24 }}>
+                    <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: C.muted }} />
+                    <YAxis type="category" dataKey="name" width={92} tick={{ fontSize: 11, fill: C.body }} />
+                    <Tooltip formatter={(v) => [`${v}/100`, cfg.scoreLabel]} labelFormatter={(l, p) => (p && p[0] ? p[0].payload.full : l)} />
+                    <Bar dataKey="score" radius={[0, 4, 4, 0]}>
+                      {chartData.map((d, i) => <Cell key={i} fill={cfg.band(d.score)} stroke={picks.includes(d.full) ? C.navy : "none"} strokeWidth={picks.includes(d.full) ? 2 : 0} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              {cfg.pick && <p style={{ fontSize: 11.5, color: C.muted, margin: "2px 0 14px" }}>Bars outlined in navy are your picks.</p>}
+              <Table rows={arr} cols={[
+                { key: cfg.nameKey, label: cfg.nameLabel, render: (r) => <strong style={{ color: C.navy }}>{r[cfg.nameKey]}{cfg.pick && picks.includes(r[cfg.nameKey]) ? " ●" : ""}</strong> },
+                { key: cfg.scoreKey, label: cfg.scoreLabel, align: "right", render: (r) => <Pill bg={cfg.band(Number(r[cfg.scoreKey]) || 0)} fg="#fff">{r[cfg.scoreKey]}</Pill> },
+                ...cfg.cols,
+              ]} />
+            </div>
+          )}
 
           <div style={{ marginTop: 12, background: C.light, borderLeft: `4px solid ${C.amber}`, borderRadius: 10, padding: "10px 14px", fontSize: 13.5, color: C.ink }}>
-            <strong style={{ color: C.navy }}>Now debate it: </strong>Where do you disagree with the AI — and who's right? The AI ranks only on the facts it's given; you may know context it doesn't. That judgement is the job AI can't do for you.
+            <strong style={{ color: C.navy }}>Now debate it: </strong>Where do you agree or disagree with the AI — and why? It reasons only from the facts it's given; your judgement and context are the part AI can't do for you.
           </div>
           <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Btn kind="ghost" small onClick={reset}><RefreshCw size={14} />Play again</Btn>
-            <Btn kind="ghost" small onClick={reveal}><Cpu size={14} />Re-run the AI</Btn>
+            {cfg.pick && <Btn kind="ghost" small onClick={() => { setPicks([]); setResult(null); setErr(""); setPhase("intro"); }}><RefreshCw size={14} />Play again</Btn>}
+            <Btn kind="ghost" small onClick={run}><Cpu size={14} />Re-run the AI</Btn>
           </div>
           <p style={{ color: C.muted, fontSize: 12, marginTop: 8, fontStyle: "italic" }}>Live analysis by AI on the fictional Northwind data — results vary slightly each run, just like real models.</p>
         </div>
@@ -1122,13 +1193,13 @@ function BeatTheAI({ code }) {
 }
 
 /* ================= AI SANDBOX ================= */
-function Sandbox({ code }) {
+function Sandbox({ code, backlog }) {
   const [v, setV] = useState({ role: "", context: "", task: "", format: "" });
   return (
     <div>
-      <H size={26}>AI Sandbox</H>
-      <p style={{ color: C.muted, marginTop: 6, fontSize: 14.5 }}>See AI work live on the Northwind case, then practise prompting yourself.</p>
-      <div style={{ marginTop: 18 }}><BeatTheAI code={code} /></div>
+      <H size={26}>AI Lab</H>
+      <p style={{ color: C.muted, marginTop: 6, fontSize: 14.5 }}>Watch AI analyse the Northwind case live across all five days, then practise prompting yourself.</p>
+      <div style={{ marginTop: 18 }}><AiAnalyst code={code} backlog={backlog} /></div>
       <Card style={{ margin: "18px 0" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
           <Wand2 size={18} color={C.teal} /><H size={17}>Prompt builder</H>
@@ -1369,10 +1440,10 @@ async function adminList(cohort, adminKey) {
   return body.seats || [];
 }
 // Live AI analysis — authorised by the learner's seat code.
-async function apiAnalyze(kind, code) {
+async function apiAnalyze(kind, code, extra) {
   if (!FN_AI_URL) return { ok: false, error: "AI service not configured." };
   try {
-    const res = await fetch(FN_AI_URL, { method: "POST", headers: fnHeaders(), body: JSON.stringify({ action: "analyze", kind, code }) });
+    const res = await fetch(FN_AI_URL, { method: "POST", headers: fnHeaders(), body: JSON.stringify({ action: "analyze", kind, code, ...(extra || {}) }) });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, error: body.error || `AI error (${res.status})` };
     return { ok: true, result: body.result };
@@ -1397,7 +1468,7 @@ const NAV = [
   { id: "home", label: "Home", icon: HomeIcon },
   { id: "explore", label: "Explore", icon: Compass },
   { id: "missions", label: "Missions", icon: ListChecks },
-  { id: "sandbox", label: "AI Sandbox", icon: Sparkles },
+  { id: "sandbox", label: "AI Lab", icon: Sparkles },
   { id: "backlog", label: "Backlog", icon: LayoutGrid },
   { id: "strategy", label: "My Strategy", icon: Rocket },
 ];
@@ -1484,7 +1555,7 @@ function Cockpit({ learner, profiles, onPick, onClaim, onRemove, onRename, openA
         {view === "home" && <Home go={setView} weekPct={weekPct} backlogCount={backlog.length} name={learner.handle} setName={onRename} />}
         {view === "explore" && <Explore />}
         {view === "missions" && <Missions day={day} setDay={setDay} answers={answers} setAnswers={setAnswers} done={done} setDone={setDone} work={work} setWork={setWork} go={setView} />}
-        {view === "sandbox" && <Sandbox code={learner.code} />}
+        {view === "sandbox" && <Sandbox code={learner.code} backlog={backlog} />}
         {view === "backlog" && <Backlog backlog={backlog} setBacklog={setBacklog} />}
         {view === "strategy" && <Strategy backlog={backlog} plan={plan} setPlan={setPlan} name={learner.handle} />}
       </main>
