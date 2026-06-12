@@ -21,6 +21,36 @@ const json = (body: unknown, status = 200) =>
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const GEMINI_MODEL = "gemini-2.5-flash";
+const CLAUDE_MODEL = "claude-haiku-4-5";
+
+function extractJson(txt: string, lead = ""): any {
+  let raw = lead + txt;
+  try { return JSON.parse(raw); } catch (e) {}
+  const a = raw.indexOf("{"), b = raw.lastIndexOf("}");
+  if (a >= 0 && b > a) { try { return JSON.parse(raw.slice(a, b + 1)); } catch (e) {} }
+  return null;
+}
+
+async function callClaude(): Promise<any> {
+  const key = Deno.env.get("COCKPIT_ANTHROPIC_KEY");
+  if (!key) return { error: "no claude key" };
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL, max_tokens: 1024,
+      system: "You are a precise supply-chain risk analyst. You output strictly valid JSON and nothing else.",
+      messages: [
+        { role: "user", content: `${SUPPLIER_BRIEF}\n\n${SCHEMA_INSTRUCTION}` },
+        { role: "assistant", content: "{" }, // prefill forces JSON
+      ],
+    }),
+  });
+  if (!res.ok) return { error: `model error ${res.status}: ${(await res.text()).slice(0, 200)}` };
+  const data = await res.json();
+  const parsed = extractJson(data?.content?.[0]?.text ?? "", "{");
+  return parsed ? { parsed } : { error: "unparseable model response" };
+}
 
 // The fixed supplier set the AI must rank — names must match so the app can score "Beat the AI".
 const SUPPLIER_BRIEF = `You are ranking the supply risk of these suppliers of Northwind, a fictional £1.8bn building-systems manufacturer. Use ONLY these and keep the names EXACTLY as written:
@@ -78,7 +108,8 @@ Deno.serve(async (req) => {
   }
   if (!allowed) return json({ error: "unauthorized — sign in with your access code first" }, 401);
 
-  const out = await callGemini();
+  // Prefer Claude (real Anthropic key) when configured; fall back to Gemini.
+  const out = Deno.env.get("COCKPIT_ANTHROPIC_KEY") ? await callClaude() : await callGemini();
   if (out.error) return json({ error: out.error }, 502);
 
   // sanitise

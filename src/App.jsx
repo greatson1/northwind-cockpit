@@ -1490,7 +1490,7 @@ function Cockpit({ learner, profiles, onPick, onClaim, onRemove, onRename, openA
       </main>
       {switcher && (
         <Switcher learner={learner} profiles={profiles} onClose={() => setSwitcher(false)}
-          onPick={(c) => { onPick(c); setSwitcher(false); }} onClaim={(seat) => { onClaim(seat); setSwitcher(false); }}
+          onPick={(c) => { onPick(c); setSwitcher(false); }} onClaim={(seat, nm) => { onClaim(seat, nm); setSwitcher(false); }}
           onRemove={onRemove} openAdmin={() => { setSwitcher(false); openAdmin(); }} />
       )}
     </div>
@@ -1500,19 +1500,21 @@ function Cockpit({ learner, profiles, onPick, onClaim, onRemove, onRename, openA
 function Switcher({ learner, profiles, onClose, onPick, onClaim, onRemove, openAdmin }) {
   const [adding, setAdding] = useState(profiles.length === 0);
   const [code, setCode] = useState("");
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 14, padding: "9px 11px", border: `1px solid ${C.line}`, borderRadius: 9, color: C.ink, background: "#fff", letterSpacing: 1 };
+  const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 14, padding: "9px 11px", border: `1px solid ${C.line}`, borderRadius: 9, color: C.ink, background: "#fff" };
+  const codeInp = { ...inp, letterSpacing: 1 };
   const submit = async () => {
     const c = normCode(code);
-    if (!c || busy) return;
+    if (!c || !name.trim() || busy) return;
     setBusy(true); setErr("");
     const r = await apiSignin(c);
     setBusy(false);
     if (r.unknown) { setErr("That access code isn't recognised."); return; }
     if (r.offline) { setErr("Couldn't reach the server — check your connection."); return; }
     if (!r.ok) { setErr(r.error || "Something went wrong."); return; }
-    onClaim(r.seat);
+    onClaim(r.seat, name.trim());
   };
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(11,37,69,0.4)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
@@ -1541,15 +1543,16 @@ function Switcher({ learner, profiles, onClose, onPick, onClaim, onRemove, openA
         {adding ? (
           <div style={{ display: "grid", gap: 10, borderTop: profiles.length ? `1px solid ${C.line}` : "none", paddingTop: profiles.length ? 14 : 0 }}>
             <div style={{ fontSize: 12.5, fontWeight: 700, color: C.muted }}>ADD A SEAT</div>
-            <input value={code} onChange={(e) => { setCode(e.target.value.toUpperCase()); setErr(""); }} placeholder="Access code (e.g. NW-7K2Q)" style={inp} onKeyDown={(e) => e.key === "Enter" && submit()} />
+            <input value={name} onChange={(e) => { setName(e.target.value); setErr(""); }} placeholder="Your name" style={inp} onKeyDown={(e) => e.key === "Enter" && submit()} />
+            <input value={code} onChange={(e) => { setCode(e.target.value.toUpperCase()); setErr(""); }} placeholder="Access code (e.g. NW-7K2Q)" style={codeInp} onKeyDown={(e) => e.key === "Enter" && submit()} />
             {err && <p style={{ color: C.red, fontSize: 12.5, margin: 0 }}>⚠ {err}</p>}
             <div style={{ display: "flex", gap: 8 }}>
-              <Btn onClick={submit} disabled={busy || !normCode(code)}><UserPlus size={15} />{busy ? "Checking…" : "Sign in"}</Btn>
+              <Btn onClick={submit} disabled={busy || !normCode(code) || !name.trim()}><UserPlus size={15} />{busy ? "Checking…" : "Sign in"}</Btn>
               {profiles.length > 0 && <Btn kind="ghost" onClick={() => { setAdding(false); setErr(""); }}>Cancel</Btn>}
             </div>
           </div>
         ) : (
-          <Btn kind="ghost" onClick={() => { setCode(""); setErr(""); setAdding(true); }}><Plus size={15} />Add a seat</Btn>
+          <Btn kind="ghost" onClick={() => { setCode(""); setName(""); setErr(""); setAdding(true); }}><Plus size={15} />Add a seat</Btn>
         )}
         <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
           <button onClick={openAdmin} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted, fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, fontFamily: sans }}>
@@ -1563,19 +1566,21 @@ function Switcher({ learner, profiles, onClose, onPick, onClaim, onRemove, openA
 
 function StartGate({ onClaim, openAdmin }) {
   const [code, setCode] = useState("");
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const inp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 18, fontWeight: 700, letterSpacing: 2, textAlign: "center", padding: "13px 13px", border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, background: "#fff", marginTop: 6 };
+  const codeInp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 18, fontWeight: 700, letterSpacing: 2, textAlign: "center", padding: "13px 13px", border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, background: "#fff", marginTop: 6 };
+  const nameInp = { width: "100%", boxSizing: "border-box", fontFamily: sans, fontSize: 15, padding: "11px 13px", border: `1px solid ${C.line}`, borderRadius: 10, color: C.ink, background: "#fff", marginTop: 6 };
+  const ready = normCode(code) && name.trim();
   const go = async () => {
-    const c = normCode(code);
-    if (!c || busy) return;
+    if (!ready || busy) return;
     setBusy(true); setErr("");
-    const r = await apiSignin(c);
+    const r = await apiSignin(normCode(code));
     setBusy(false);
     if (r.unknown) { setErr("That access code isn't recognised. Check it with your facilitator."); return; }
     if (r.offline) { setErr("Couldn't reach the server — check your connection and try again."); return; }
     if (!r.ok) { setErr(r.error || "Something went wrong. Please try again."); return; }
-    onClaim(r.seat);
+    onClaim(r.seat, name.trim());
   };
   return (
     <div style={{ fontFamily: sans, minHeight: "100vh", background: `linear-gradient(135deg, ${C.navy}, ${C.deep})`, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -1587,13 +1592,16 @@ function StartGate({ onClaim, openAdmin }) {
             <div style={{ fontFamily: serif, fontSize: 20, fontWeight: 700, color: C.navy, lineHeight: 1.1 }}>The Northwind Cockpit</div>
           </div>
         </div>
-        <p style={{ color: C.body, fontSize: 14, lineHeight: 1.55, margin: "0 0 18px" }}>Enter the access code your facilitator gave you. It's your private key — your work follows it on any device.</p>
-        <label style={{ fontSize: 12.5, fontWeight: 700, color: C.muted }}>Access code
-          <input value={code} onChange={(e) => { setCode(e.target.value.toUpperCase()); setErr(""); }} placeholder="NW-XXXXX" style={inp} onKeyDown={(e) => e.key === "Enter" && go()} autoFocus />
+        <p style={{ color: C.body, fontSize: 14, lineHeight: 1.55, margin: "0 0 18px" }}>Enter your name and the access code your facilitator gave you. The code is your private key — your work follows it on any device.</p>
+        <label style={{ fontSize: 12.5, fontWeight: 700, color: C.muted }}>Your name
+          <input value={name} onChange={(e) => { setName(e.target.value); setErr(""); }} placeholder="e.g. Alex Morgan" style={nameInp} onKeyDown={(e) => e.key === "Enter" && go()} autoFocus />
+        </label>
+        <label style={{ fontSize: 12.5, fontWeight: 700, color: C.muted, display: "block", marginTop: 14 }}>Access code
+          <input value={code} onChange={(e) => { setCode(e.target.value.toUpperCase()); setErr(""); }} placeholder="NW-XXXXX" style={codeInp} onKeyDown={(e) => e.key === "Enter" && go()} />
         </label>
         {err && <p style={{ color: C.red, fontSize: 13, margin: "10px 0 0" }}>⚠ {err}</p>}
         <div style={{ marginTop: 20 }}>
-          <Btn kind="navy" onClick={go} disabled={!normCode(code) || busy} style={{ width: "100%", justifyContent: "center" }}>{busy ? "Checking…" : "Enter the Cockpit"} {!busy && <ChevronRight size={16} />}</Btn>
+          <Btn kind="navy" onClick={go} disabled={!ready || busy} style={{ width: "100%", justifyContent: "center" }}>{busy ? "Checking…" : "Enter the Cockpit"} {!busy && <ChevronRight size={16} />}</Btn>
         </div>
         <div style={{ marginTop: 16, textAlign: "center" }}>
           <button onClick={openAdmin} style={{ border: "none", background: "none", cursor: "pointer", color: C.muted, fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6, fontFamily: sans }}>
@@ -1786,10 +1794,14 @@ export default function App() {
   }, []);
   const commit = (next) => { setProfiles(next); saveProfiles(next); };
   const onPick = (code) => commit({ ...profiles, active: code });
-  // claim/sign in a seat returned by the edge function; cache its data locally
-  const onClaim = (seat) => {
-    const prof = { code: seat.code, cohort: seat.cohort, handle: seat.handle || "" };
-    ls.set(dataKey(seat.code), JSON.stringify(seat.data || {}));
+  // claim/sign in a seat returned by the edge function; attach the entered name
+  // to the seat (so the dashboard shows it) and cache its data locally
+  const onClaim = (seat, name) => {
+    const handle = (name && name.trim()) || seat.handle || "";
+    const prof = { code: seat.code, cohort: seat.cohort, handle };
+    const data = seat.data || {};
+    ls.set(dataKey(seat.code), JSON.stringify(data));
+    if (handle && handle !== seat.handle) apiSave(seat.code, handle, data); // persist name to the seat
     const exists = profiles.list.some((p) => p.code === seat.code);
     const list = exists ? profiles.list.map((p) => p.code === seat.code ? prof : p) : [...profiles.list, prof];
     commit({ active: seat.code, list });
