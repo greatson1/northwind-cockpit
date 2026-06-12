@@ -1684,6 +1684,311 @@ function StartGate({ onClaim, openAdmin }) {
   );
 }
 
+/* ================= INSTRUCTOR DASHBOARD — analytics ================= */
+const ACT_DEF = {};
+DAYS.forEach((d) => d.activities.forEach((a) => { ACT_DEF[a.id] = a; }));
+const MEDAL = ["🥇", "🥈", "🥉"];
+const segBtn = (active) => ({ fontFamily: sans, fontSize: 12.5, fontWeight: 700, padding: "6px 13px", borderRadius: 999, cursor: "pointer", border: `1px solid ${active ? C.teal : C.line}`, background: active ? C.teal : "#fff", color: active ? "#fff" : C.body });
+const chipBtn = (active) => ({ fontFamily: sans, fontSize: 12, fontWeight: 600, padding: "5px 10px", borderRadius: 8, cursor: "pointer", border: `1px solid ${active ? C.navy : C.line}`, background: active ? C.cardl : "#fff", color: active ? C.navy : C.body, textAlign: "left" });
+const thL = { textAlign: "left", color: "#fff", fontWeight: 600, padding: "9px 11px", whiteSpace: "nowrap" };
+const thC = { textAlign: "center", color: "#fff", fontWeight: 600, padding: "9px 11px", whiteSpace: "nowrap" };
+const tdC = { textAlign: "center", padding: "8px 11px", borderTop: `1px solid ${C.line}` };
+
+// per-learner quiz accuracy + score, computed from the interactive `work` state
+function quizStats(data) {
+  const work = (data && data.work) || {};
+  let correct = 0, possible = 0, answered = 0;
+  Object.keys(ACT_DEF).forEach((id) => {
+    const a = ACT_DEF[id], wk = work[id];
+    if (!wk || !wk.checked) return;
+    if (a.type === "classify") {
+      const pl = wk.placements || {};
+      correct += a.items.filter((it) => pl[it] === a.correct[it]).length;
+      possible += a.items.length; answered++;
+    } else if (a.type === "spot") {
+      const sel = wk.sel || [];
+      correct += sel.filter((s) => a.correct.includes(s)).length;
+      possible += a.correct.length; answered++;
+    }
+  });
+  return { correct, possible, answered, pct: possible ? Math.round((correct / possible) * 100) : 0 };
+}
+function scoreOf(data) {
+  const done = ALL_IDS.filter((id) => data && data.done && data.done[id]).length;
+  const q = quizStats(data);
+  const backlog = (data && data.backlog && data.backlog.length) || 0;
+  const plan = data && (data.plan || "").trim() ? 1 : 0;
+  return { done, correct: q.correct, accuracy: q.pct, answered: q.answered, backlog, plan, points: done + q.correct * 2 + backlog + plan * 5 };
+}
+
+/* ---- Winners / leaderboard ---- */
+function Leaderboard({ learners }) {
+  if (learners.length === 0) return <Card><p style={{ margin: 0, color: C.muted }}>No one has signed in yet.</p></Card>;
+  const ranked = learners.map((l) => ({ ...l, s: scoreOf(l.data) })).sort((a, b) => b.s.points - a.s.points);
+  const max = Math.max(1, ranked[0].s.points);
+  const top3 = ranked.slice(0, 3);
+  const best = (key) => ranked.slice().sort((a, b) => b.s[key] - a.s[key])[0];
+  const supers = [
+    { label: "Furthest along", w: best("done"), val: (s) => `${Math.round((s.done / ALL_IDS.length) * 100)}%`, ok: (s) => s.done > 0 },
+    { label: "Sharpest answers", w: best("accuracy"), val: (s) => `${s.accuracy}%`, ok: (s) => s.answered >= 2 },
+    { label: "Most opportunities", w: best("backlog"), val: (s) => `${s.backlog}`, ok: (s) => s.backlog > 0 },
+  ].filter((x) => x.w && x.ok(x.w.s));
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(3, top3.length)},1fr)`, gap: 12, marginBottom: 16 }}>
+        {top3.map((l, i) => (
+          <Card key={l.code} style={{ textAlign: "center", borderTop: `4px solid ${[C.gold, C.muted, C.amber][i]}`, padding: "18px 14px" }}>
+            <div style={{ fontSize: 30 }}>{MEDAL[i]}</div>
+            <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 700, color: C.navy, marginTop: 2 }}>{l.name || l.code}</div>
+            <div style={{ fontFamily: serif, fontSize: 32, fontWeight: 700, color: C.teal, lineHeight: 1.1 }}>{l.s.points}</div>
+            <div style={{ fontSize: 11, color: C.muted }}>points</div>
+          </Card>
+        ))}
+      </div>
+      {supers.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12, marginBottom: 16 }}>
+          {supers.map((x) => (
+            <Card key={x.label} style={{ padding: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: C.muted, fontWeight: 700 }}><Trophy size={13} color={C.amber} />{x.label.toUpperCase()}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.navy, marginTop: 3 }}>{x.w.name || x.w.code}</div>
+              <div style={{ fontSize: 13, color: C.teal, fontWeight: 700 }}>{x.val(x.w.s)}</div>
+            </Card>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "grid", gap: 8 }}>
+        {ranked.map((l, i) => (
+          <div key={l.code} style={{ display: "flex", alignItems: "center", gap: 12, background: "#fff", border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px" }}>
+            <div style={{ width: 28, textAlign: "center", fontWeight: 700, color: C.muted, fontSize: i < 3 ? 18 : 14 }}>{i < 3 ? MEDAL[i] : i + 1}</div>
+            <div style={{ minWidth: 120, flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>{l.name || l.code}</div>
+              <div style={{ fontSize: 11, color: C.muted }}>{Math.round((l.s.done / ALL_IDS.length) * 100)}% done · {l.s.accuracy}% accuracy · {l.s.backlog} opps{l.s.plan ? " · plan ✓" : ""}</div>
+            </div>
+            <div style={{ width: "38%", minWidth: 110 }}>
+              <div style={{ height: 8, background: C.line, borderRadius: 99 }}><div style={{ width: `${(l.s.points / max) * 100}%`, height: "100%", background: C.teal, borderRadius: 99 }} /></div>
+            </div>
+            <div style={{ fontFamily: serif, fontSize: 18, fontWeight: 700, color: C.navy, width: 40, textAlign: "right" }}>{l.s.points}</div>
+          </div>
+        ))}
+      </div>
+      <p style={{ fontSize: 11.5, color: C.muted, marginTop: 10 }}>Points = activities done + 2× correct quiz answers + opportunities captured + 5 for a written plan.</p>
+    </div>
+  );
+}
+
+/* ---- per-exercise aggregation ---- */
+function ExerciseAgg({ a, learners }) {
+  if (a.type === "classify") {
+    const rows = a.items.map((it) => {
+      const counts = {}; a.buckets.forEach((b) => (counts[b] = 0));
+      let placed = 0, correct = 0;
+      learners.forEach((l) => {
+        const wk = (l.data.work || {})[a.id]; if (!wk || !wk.checked) return;
+        const b = (wk.placements || {})[it];
+        if (b && counts[b] !== undefined) { counts[b]++; placed++; if (b === a.correct[it]) correct++; }
+      });
+      return { it, counts, placed, correct };
+    });
+    return (
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: sans, fontSize: 13, minWidth: 480 }}>
+          <thead><tr style={{ background: C.deep }}><th style={thL}>Item</th>{a.buckets.map((b) => <th key={b} style={thC}>{b}</th>)}<th style={thC}>Right</th></tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.it} style={{ background: i % 2 ? C.light : "#fff" }}>
+                <td style={{ textAlign: "left", padding: "8px 11px", borderTop: `1px solid ${C.line}` }}><strong style={{ color: C.navy }}>{r.it}</strong></td>
+                {a.buckets.map((b) => { const ok = a.correct[r.it] === b; return <td key={b} style={{ ...tdC, background: ok ? C.greenl : "transparent", fontWeight: ok ? 700 : 400, color: ok ? C.green : C.body }}>{r.counts[b] || ""}</td>; })}
+                <td style={{ ...tdC, color: C.muted }}>{r.placed ? Math.round((r.correct / r.placed) * 100) + "%" : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p style={{ fontSize: 11.5, color: C.muted, marginTop: 8 }}>Green column = the correct bucket. Numbers = how many learners placed each item there.</p>
+      </div>
+    );
+  }
+  if (a.type === "spot") {
+    const data = a.options.map((o) => {
+      let n = 0; learners.forEach((l) => { const wk = (l.data.work || {})[a.id]; if (wk && wk.checked && (wk.sel || []).includes(o)) n++; });
+      return { name: o.length > 24 ? o.slice(0, 23) + "…" : o, full: o, n, correct: a.correct.includes(o) };
+    });
+    let answered = 0, full = 0;
+    learners.forEach((l) => { const wk = (l.data.work || {})[a.id]; if (wk && wk.checked) { answered++; const sel = wk.sel || []; if (sel.length === a.correct.length && sel.every((s) => a.correct.includes(s))) full++; } });
+    return (
+      <div>
+        <div style={{ height: Math.max(150, data.length * 34) }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} layout="vertical" margin={{ left: 10, right: 24 }}>
+              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: C.muted }} />
+              <YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11, fill: C.body }} />
+              <Tooltip formatter={(v) => [v, "picked"]} labelFormatter={(l, p) => (p && p[0] ? p[0].payload.full : l)} />
+              <Bar dataKey="n" radius={[0, 4, 4, 0]}>{data.map((d, i) => <Cell key={i} fill={d.correct ? C.green : C.muted} />)}</Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <p style={{ fontSize: 11.5, color: C.muted, marginTop: 6 }}>Green bars = correct answers · {full}/{answered} got it fully right.</p>
+      </div>
+    );
+  }
+  // text-based: reflect / ai / case / lab
+  const responses = learners.map((l) => {
+    let text = (l.data.answers || {})[a.id] || "";
+    if (a.type === "lab" && !text.trim()) { const b = (l.data.work || {})[a.id] && (l.data.work || {})[a.id].builder; if (b) text = buildPrompt(b); }
+    return { name: l.name || l.code, text };
+  }).filter((x) => x.text.trim());
+  if (responses.length === 0) return <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>No written responses yet.</p>;
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      {responses.map((r, i) => (
+        <div key={i} style={{ background: "#fff", border: `1px solid ${C.line}`, borderRadius: 8, padding: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: C.teal }}>{r.name}</div>
+          <div style={{ fontSize: 13.5, color: C.ink, whiteSpace: "pre-wrap", marginTop: 3 }}>{r.text}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function ByExercise({ learners }) {
+  const [dayN, setDayN] = useState(1);
+  const [actId, setActId] = useState(DAYS[0].activities[0].id);
+  const day = DAYS[dayN - 1];
+  const a = ACT_DEF[actId] && ACT_DEF[actId].id && day.activities.some((x) => x.id === actId) ? ACT_DEF[actId] : day.activities[0];
+  const pickDay = (n) => { setDayN(n); setActId(DAYS[n - 1].activities[0].id); };
+  const responders = learners.filter((l) => {
+    const wk = (l.data.work || {})[a.id], ans = (l.data.answers || {})[a.id];
+    return (wk && (wk.checked || wk.builder)) || (ans && ans.trim());
+  });
+  const meta = TYPE_META[a.type] || { c: C.teal, t: a.type };
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+        {DAYS.map((d) => <button key={d.n} onClick={() => pickDay(d.n)} style={segBtn(dayN === d.n)}>Day {d.n}</button>)}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+        {day.activities.map((act) => <button key={act.id} onClick={() => setActId(act.id)} style={chipBtn(a.id === act.id)}>{act.sub} · {act.title}</button>)}
+      </div>
+      <Card>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+          <Pill bg={meta.c} fg="#fff">{meta.t}</Pill><H size={17}>{a.title}</H>
+        </div>
+        <div style={{ fontSize: 12.5, color: C.muted, marginBottom: 14 }}>{responders.length} of {learners.length} answered</div>
+        <ExerciseAgg a={a} learners={learners} />
+      </Card>
+    </div>
+  );
+}
+
+/* ---- cohort backlog ---- */
+function CohortBacklog({ learners }) {
+  const all = learners.flatMap((l) => l.data.backlog || []);
+  if (!all.length) return <Card><p style={{ margin: 0, color: C.muted }}>No opportunities captured yet.</p></Card>;
+  const pieData = GOALS.map((g) => ({ name: g, value: all.filter((b) => b.goal === g).length, fill: GOAL_COLOR[g] })).filter((d) => d.value > 0);
+  const cell = (v, r) => all.filter((b) => b.value === v && b.readiness === r).length;
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 16 }}>
+        <Stat label="OPPORTUNITIES" value={all.length} />
+        <Stat label="CONTRIBUTORS" value={learners.filter((l) => (l.data.backlog || []).length).length} />
+        <Stat label="QUICK WINS" value={all.filter((b) => b.value === "High" && b.readiness === "High").length} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 16 }}>
+        <Card>
+          <H size={16} style={{ marginBottom: 8 }}>By goal</H>
+          <div style={{ height: 210 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart><Pie data={pieData} dataKey="value" nameKey="name" innerRadius={42} outerRadius={78} paddingAngle={2}>{pieData.map((e, i) => <Cell key={i} fill={e.fill} />)}</Pie><Tooltip /></PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", gap: 12, flexWrap: "wrap" }}>
+            {pieData.map((e) => <span key={e.name} style={{ fontSize: 12, color: C.body, display: "flex", alignItems: "center", gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: e.fill, display: "inline-block" }} />{e.name} {e.value}</span>)}
+          </div>
+        </Card>
+        <Card>
+          <H size={16} style={{ marginBottom: 8 }}>Value × readiness</H>
+          <div style={{ display: "grid", gridTemplateColumns: "62px repeat(3,1fr)", gap: 6 }}>
+            <div />
+            {LEVELS.slice().reverse().map((rd) => <div key={rd} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, color: C.muted }}>R:{rd}</div>)}
+            {LEVELS.map((v) => (
+              <React.Fragment key={v}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, display: "flex", alignItems: "center" }}>V:{v}</div>
+                {LEVELS.slice().reverse().map((rd) => { const n = cell(v, rd); const quick = v === "High" && rd === "High"; return (
+                  <div key={rd} style={{ minHeight: 46, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: serif, fontSize: 20, fontWeight: 700, color: n ? (quick ? C.green : C.navy) : C.line, background: quick ? C.greenl : C.light, border: `1px solid ${quick ? C.mint : C.line}` }}>{n || ""}</div>
+                ); })}
+              </React.Fragment>
+            ))}
+          </div>
+          <p style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>Top-left (high value, high readiness) = the cohort's quick wins.</p>
+        </Card>
+      </div>
+      <H size={16} style={{ margin: "18px 0 10px" }}>All opportunities ({all.length})</H>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 8 }}>
+        {all.map((b, i) => <div key={i} style={{ fontSize: 12.5, background: "#fff", border: `1px solid ${C.line}`, borderLeft: `3px solid ${GOAL_COLOR[b.goal] || C.teal}`, borderRadius: 7, padding: "6px 9px", color: C.ink }}><strong style={{ color: C.navy }}>{b.title}</strong> <span style={{ color: C.muted }}>· {b.value}/{b.readiness}</span></div>)}
+      </div>
+    </div>
+  );
+}
+
+/* ---- roster (per-seat detail) ---- */
+function Roster({ rows, open, setOpen }) {
+  if (rows.length === 0) return <Card><p style={{ margin: 0, color: C.muted }}>No seats yet for this cohort. Generate some codes above.</p></Card>;
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {rows.map((r) => {
+        const claimed = !!r.claimed_at;
+        const pct = pctOf(r.data && r.data.done);
+        const bl = (r.data && r.data.backlog) || [];
+        const isOpen = open === r.code;
+        const title = r.handle || (claimed ? "(no name set)" : "Unclaimed seat");
+        return (
+          <Card key={r.code} style={{ padding: 0, overflow: "hidden", opacity: claimed ? 1 : 0.7 }}>
+            <button onClick={() => claimed && setOpen(isOpen ? null : r.code)}
+              style={{ width: "100%", border: "none", background: "none", cursor: claimed ? "pointer" : "default", textAlign: "left", padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              <div style={{ width: 34, height: 34, borderRadius: 999, background: claimed ? C.teal : C.muted, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{claimed && r.handle ? r.handle.charAt(0).toUpperCase() : "·"}</div>
+              <div style={{ minWidth: 140, flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: claimed ? C.navy : C.muted }}>{title} <span style={{ fontFamily: "Consolas, monospace", fontSize: 12, color: C.muted, fontWeight: 600 }}>· {r.code}</span></div>
+                <div style={{ fontSize: 11.5, color: C.muted }}>Cohort {r.cohort} · {claimed ? `active ${new Date(r.updated_at).toLocaleString()}` : "not yet used"}</div>
+              </div>
+              {claimed && <div style={{ minWidth: 120 }}>
+                <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{pct}% · {bl.length} opps</div>
+                <div style={{ height: 6, width: 120, background: C.line, borderRadius: 99, marginTop: 4 }}><div style={{ width: `${pct}%`, height: "100%", background: C.teal, borderRadius: 99 }} /></div>
+              </div>}
+              {claimed && <ChevronDown size={17} color={C.muted} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />}
+            </button>
+            {isOpen && claimed && (
+              <div style={{ borderTop: `1px solid ${C.line}`, padding: 16, background: C.light }}>
+                <H size={14} style={{ marginBottom: 8 }}>Opportunity backlog ({bl.length})</H>
+                {bl.length === 0 ? <p style={{ color: C.muted, fontSize: 13, margin: "0 0 14px" }}>None captured.</p> : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+                    {bl.map((b) => <span key={b.id} style={{ fontSize: 12.5, background: "#fff", border: `1px solid ${C.line}`, borderLeft: `3px solid ${GOAL_COLOR[b.goal] || C.teal}`, borderRadius: 7, padding: "5px 9px", color: C.ink }}>{b.title} <span style={{ color: C.muted }}>· {b.value}/{b.readiness}</span></span>)}
+                  </div>
+                )}
+                <H size={14} style={{ marginBottom: 8 }}>90-day plan</H>
+                <p style={{ whiteSpace: "pre-wrap", fontSize: 13.5, color: (r.data && (r.data.plan || "").trim()) ? C.ink : C.muted, margin: "0 0 14px", background: "#fff", border: `1px solid ${C.line}`, borderRadius: 8, padding: 10 }}>{(r.data && (r.data.plan || "").trim()) || "— not written yet —"}</p>
+                <H size={14} style={{ marginBottom: 8 }}>Mission notes</H>
+                {(() => {
+                  const ans = (r.data && r.data.answers) || {};
+                  const filled = Object.entries(ans).filter(([, v]) => (v || "").trim());
+                  if (filled.length === 0) return <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>No notes yet.</p>;
+                  return (
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {filled.map(([id, v]) => (
+                        <div key={id} style={{ background: "#fff", border: `1px solid ${C.line}`, borderRadius: 8, padding: 10 }}>
+                          <div style={{ fontSize: 11, color: C.muted, fontWeight: 700 }}>{actLabel(id)}</div>
+                          <div style={{ fontSize: 13.5, color: C.ink, whiteSpace: "pre-wrap", marginTop: 3 }}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ================= INSTRUCTOR DASHBOARD ================= */
 function Admin({ onExit }) {
   const [cohort, setCohort] = useState("");
@@ -1692,6 +1997,7 @@ function Admin({ onExit }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(null);
+  const [tab, setTab] = useState("board");
   // code generator
   const [genCohort, setGenCohort] = useState("");
   const [genCount, setGenCount] = useState("10");
@@ -1716,6 +2022,8 @@ function Admin({ onExit }) {
   };
   const copyCodes = async () => { try { await navigator.clipboard.writeText((genCodes || []).join("\n")); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch (e) {} };
   const claimedRows = rows ? rows.filter((r) => r.claimed_at) : [];
+  const learners = claimedRows.map((r) => ({ name: r.handle, code: r.code, data: r.data || {} }));
+  const TABS = [{ id: "board", label: "Leaderboard" }, { id: "exercise", label: "By exercise" }, { id: "backlog", label: "Cohort backlog" }, { id: "roster", label: "Roster" }];
   return (
     <div style={{ fontFamily: sans, background: C.light, minHeight: "100vh", color: C.body }}>
       <div style={{ background: `linear-gradient(135deg, ${C.navy}, ${C.deep})`, color: "#fff", padding: "20px clamp(16px,4vw,44px)" }}>
@@ -1770,71 +2078,17 @@ function Admin({ onExit }) {
           <div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 16 }}>
               <Stat label="SEATS" value={rows.length} />
-              <Stat label="CLAIMED" value={claimedRows.length} />
-              <Stat label="AVG PROGRESS" value={`${claimedRows.length ? Math.round(claimedRows.reduce((a, r) => a + pctOf(r.data?.done), 0) / claimedRows.length) : 0}%`} />
-              <Stat label="OPPORTUNITIES" value={rows.reduce((a, r) => a + (r.data?.backlog?.length || 0), 0)} />
+              <Stat label="SIGNED IN" value={claimedRows.length} />
+              <Stat label="AVG PROGRESS" value={`${claimedRows.length ? Math.round(claimedRows.reduce((a, r) => a + pctOf(r.data && r.data.done), 0) / claimedRows.length) : 0}%`} />
+              <Stat label="OPPORTUNITIES" value={rows.reduce((a, r) => a + ((r.data && r.data.backlog && r.data.backlog.length) || 0), 0)} />
             </div>
-            {rows.length === 0 && <Card><p style={{ margin: 0, color: C.muted }}>No seats yet for this cohort. Generate some codes above.</p></Card>}
-            <div style={{ display: "grid", gap: 10 }}>
-              {rows.map((r) => {
-                const claimed = !!r.claimed_at;
-                const pct = pctOf(r.data?.done);
-                const bl = r.data?.backlog || [];
-                const isOpen = open === r.code;
-                const title = r.handle || (claimed ? "(no name set)" : "Unclaimed seat");
-                return (
-                  <Card key={r.code} style={{ padding: 0, overflow: "hidden", opacity: claimed ? 1 : 0.7 }}>
-                    <button onClick={() => claimed && setOpen(isOpen ? null : r.code)}
-                      style={{ width: "100%", border: "none", background: "none", cursor: claimed ? "pointer" : "default", textAlign: "left", padding: "14px 16px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-                      <div style={{ width: 34, height: 34, borderRadius: 999, background: claimed ? C.teal : C.muted, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, flexShrink: 0 }}>{claimed ? (r.handle ? r.handle.charAt(0).toUpperCase() : "·") : "·"}</div>
-                      <div style={{ minWidth: 140, flex: 1 }}>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: claimed ? C.navy : C.muted }}>{title} <span style={{ fontFamily: "Consolas, monospace", fontSize: 12, color: C.muted, fontWeight: 600 }}>· {r.code}</span></div>
-                        <div style={{ fontSize: 11.5, color: C.muted }}>Cohort {r.cohort} · {claimed ? `active ${new Date(r.updated_at).toLocaleString()}` : "not yet used"}</div>
-                      </div>
-                      {claimed && <div style={{ minWidth: 120 }}>
-                        <div style={{ fontSize: 11, color: C.muted, fontWeight: 600 }}>{pct}% · {bl.length} opps</div>
-                        <div style={{ height: 6, width: 120, background: C.line, borderRadius: 99, marginTop: 4 }}><div style={{ width: `${pct}%`, height: "100%", background: C.teal, borderRadius: 99 }} /></div>
-                      </div>}
-                      {claimed && <ChevronDown size={17} color={C.muted} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform .15s" }} />}
-                    </button>
-                    {isOpen && claimed && (
-                      <div style={{ borderTop: `1px solid ${C.line}`, padding: 16, background: C.light }}>
-                        <H size={14} style={{ marginBottom: 8 }}>Opportunity backlog ({bl.length})</H>
-                        {bl.length === 0 ? <p style={{ color: C.muted, fontSize: 13, margin: "0 0 14px" }}>None captured.</p> : (
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
-                            {bl.map((b) => (
-                              <span key={b.id} style={{ fontSize: 12.5, background: "#fff", border: `1px solid ${C.line}`, borderLeft: `3px solid ${GOAL_COLOR[b.goal] || C.teal}`, borderRadius: 7, padding: "5px 9px", color: C.ink }}>
-                                {b.title} <span style={{ color: C.muted }}>· {b.value}/{b.readiness}</span>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        <H size={14} style={{ marginBottom: 8 }}>90-day plan</H>
-                        <p style={{ whiteSpace: "pre-wrap", fontSize: 13.5, color: (r.data?.plan || "").trim() ? C.ink : C.muted, margin: "0 0 14px", background: "#fff", border: `1px solid ${C.line}`, borderRadius: 8, padding: 10 }}>
-                          {(r.data?.plan || "").trim() || "— not written yet —"}
-                        </p>
-                        <H size={14} style={{ marginBottom: 8 }}>Mission notes</H>
-                        {(() => {
-                          const ans = r.data?.answers || {};
-                          const filled = Object.entries(ans).filter(([, v]) => (v || "").trim());
-                          if (filled.length === 0) return <p style={{ color: C.muted, fontSize: 13, margin: 0 }}>No notes yet.</p>;
-                          return (
-                            <div style={{ display: "grid", gap: 8 }}>
-                              {filled.map(([id, v]) => (
-                                <div key={id} style={{ background: "#fff", border: `1px solid ${C.line}`, borderRadius: 8, padding: 10 }}>
-                                  <div style={{ fontSize: 11, color: C.muted, fontWeight: 700 }}>{actLabel(id)}</div>
-                                  <div style={{ fontSize: 13.5, color: C.ink, whiteSpace: "pre-wrap", marginTop: 3 }}>{v}</div>
-                                </div>
-                              ))}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    )}
-                  </Card>
-                );
-              })}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+              {TABS.map((t) => <button key={t.id} onClick={() => setTab(t.id)} style={segBtn(tab === t.id)}>{t.label}</button>)}
             </div>
+            {tab === "board" && <Leaderboard learners={learners} />}
+            {tab === "exercise" && <ByExercise learners={learners} />}
+            {tab === "backlog" && <CohortBacklog learners={learners} />}
+            {tab === "roster" && <Roster rows={rows} open={open} setOpen={setOpen} />}
           </div>
         )}
       </div>
