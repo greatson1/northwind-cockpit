@@ -1994,6 +1994,7 @@ function Admin({ onExit }) {
   const [cohort, setCohort] = useState("");
   const [key, setKey] = useState("");
   const [rows, setRows] = useState(null);
+  const [authed, setAuthed] = useState(false); // unlocked only after the passphrase verifies server-side
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(null);
@@ -2008,8 +2009,8 @@ function Admin({ onExit }) {
   const inp = { fontFamily: sans, fontSize: 14, padding: "9px 11px", border: `1px solid ${C.line}`, borderRadius: 9, color: C.ink, background: "#fff" };
   const run = async () => {
     setBusy(true); setErr("");
-    try { setRows(await adminList(cohort.trim(), key.trim())); }
-    catch (e) { setErr(e.message || "Failed to load"); setRows(null); }
+    try { setRows(await adminList(cohort.trim(), key.trim())); setAuthed(true); }
+    catch (e) { setErr(e.message || "Failed to load"); setRows(null); setAuthed(false); }
     finally { setBusy(false); }
   };
   const generate = async () => {
@@ -2045,11 +2046,19 @@ function Admin({ onExit }) {
               <input value={key} onChange={(e) => setKey(e.target.value)} type="password" placeholder="passphrase" style={{ ...inp, marginTop: 5 }} onKeyDown={(e) => e.key === "Enter" && run()} /></label>
             <label style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Cohort filter <span style={{ fontWeight: 400 }}>(blank = all)</span><br />
               <input value={cohort} onChange={(e) => setCohort(e.target.value)} placeholder="e.g. JUN-2026" style={{ ...inp, marginTop: 5 }} onKeyDown={(e) => e.key === "Enter" && run()} /></label>
-            <Btn kind="navy" onClick={run} disabled={!key.trim() || busy}><RefreshCw size={15} />{busy ? "Loading…" : "Load roster"}</Btn>
+            <Btn kind="navy" onClick={run} disabled={!key.trim() || busy}><RefreshCw size={15} />{busy ? "Loading…" : authed ? "Reload roster" : "Unlock dashboard"}</Btn>
           </div>
           {err && <p style={{ color: C.amber, fontSize: 13, marginTop: 10, marginBottom: 0 }}>⚠ {err}</p>}
         </Card>
 
+        {!authed && (
+          <Card style={{ marginBottom: 18, textAlign: "center", color: C.muted }}>
+            <Shield size={20} color={C.muted} style={{ marginBottom: 6 }} />
+            <p style={{ fontSize: 13.5, margin: 0 }}>Enter the admin passphrase above to unlock the instructor tools — issuing access codes, the roster and cohort analytics.</p>
+          </Card>
+        )}
+
+        {authed && (<>
         <Card style={{ marginBottom: 18 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}><UserPlus size={17} color={C.teal} /><H size={16}>Issue access codes</H></div>
           <p style={{ color: C.body, fontSize: 13, margin: "0 0 10px" }}>Generate seat codes for a cohort, then hand them out — one per learner. The code is their identity and key; their work follows it across devices.</p>
@@ -2091,6 +2100,7 @@ function Admin({ onExit }) {
             {tab === "roster" && <Roster rows={rows} open={open} setOpen={setOpen} />}
           </div>
         )}
+        </>)}
       </div>
     </div>
   );
