@@ -23,24 +23,24 @@ npm run build    # production build to dist/
 npm run preview  # preview the production build
 ```
 
-## Multi-user & instructor dashboard
+## Multi-user, identity & instructor dashboard
 
-The app supports many learners with a **local-first + backend-mirror** model — no logins or passwords.
+Per-learner identity with **no personal data and no passwords/email** — and therefore **no Supabase Auth**, so nothing here affects any other app on the same Supabase project.
 
-- **Identity:** on first load a learner enters their **name** + a **cohort / join code** you hand out. A stable `learnerId` (UUID) is generated and stored locally. Progress is namespaced per learner (`cockpit:v1:<learnerId>`), so several people can share one browser without colliding — the sidebar chip lets them **Switch / add learner**.
-- **Sync:** every change saves to `localStorage` instantly and is mirrored (debounced) to the backend so it can be collected centrally. The same person on a second device starts a fresh session — there is intentionally no cross-device sync.
-- **Dashboard:** open `#admin` (or the "Instructor dashboard" link on the start/switch screens), enter the admin passphrase, and load a cohort to see every learner's progress %, opportunity backlog, 90-day plan, and mission notes.
+- **Access codes are the identity.** The instructor generates seat codes (`NW-XXXXX`) in the dashboard and hands them out, one per learner. The code is both the learner's identity and their secret: entering it on **any device** loads their work (true cross-device sync), and an **unknown code can't write**, so seats can't be impersonated or spammed. Learners may set an optional display **handle** (a nickname, not personal data).
+- **Local + sync.** Progress saves to `localStorage` instantly and mirrors (debounced) to the backend; signing in pulls the server copy so a second device picks up where the first left off. Several seats can share one browser — the sidebar chip lets you **Switch / add a seat**.
+- **Dashboard.** Open `#admin` (or the "Instructor dashboard" link on the sign-in screen) and enter the admin passphrase to **issue access codes** (cohort + count → copy-all) and view the **roster** — claimed vs unclaimed seats, each with progress %, opportunity backlog, 90-day plan, and mission notes.
 
 ### Backend
 
-A single Supabase **edge function** (`supabase/functions/cockpit-sync`) handles both writes and dashboard reads using the service role. The `cockpit_sessions` table is **RLS-locked with no policies and anon revoked**, so the public anon key can't read or write learner data directly — only the function can. The dashboard read is gated by an `ADMIN_KEY` secret checked inside the function.
+Data lives in an **isolated `cockpit` schema** (a partition), reached only through a single Supabase **edge function** (`supabase/functions/cockpit-sync`) using the service role via `SECURITY DEFINER` RPCs — the public anon key can't touch it. The function exposes `signin` / `save` (open to any valid, pre-issued code) and `list` / `generate` (gated by an `ADMIN_KEY` secret).
 
 | Setting | Where |
 |---|---|
 | `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | Build-time env (Vercel + local `.env`). Public/safe to ship. |
-| `ADMIN_KEY` | Supabase function secret — the dashboard passphrase. Change with `supabase secrets set ADMIN_KEY=... --project-ref <ref>`. |
+| `ADMIN_KEY` | Supabase function secret — the dashboard passphrase (issue codes + read roster). Change with `supabase secrets set ADMIN_KEY=... --project-ref <ref>`. |
 
-Copy `.env.example` to `.env` for local dev. Leaving the env vars blank runs the app in **local-only mode** (per-browser progress, no cohort sync, no dashboard).
+Copy `.env.example` to `.env` for local dev. Leaving the env vars blank runs the app in **local-only mode** (per-browser progress, no codes/sync/dashboard).
 
 ## Deploy
 
