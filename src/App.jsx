@@ -5,7 +5,7 @@ import {
 import {
   Compass, ListChecks, LayoutGrid, Rocket, Home as HomeIcon, Copy, Check, Plus, X,
   AlertTriangle, ChevronRight, ChevronDown, Building2, Sparkles, CheckCircle2, Circle, Wand2,
-  Users, UserPlus, LogOut, Shield, RefreshCw,
+  Users, UserPlus, LogOut, Shield, RefreshCw, Cpu, Trophy,
 } from "lucide-react";
 
 /* ---------------- palette & type ---------------- */
@@ -1010,13 +1010,125 @@ function Missions({ day, setDay, answers, setAnswers, done, setDone, work, setWo
   );
 }
 
+/* ================= LIVE AI ANALYST · BEAT THE AI ================= */
+const RISK_SET = ["Helios Components", "Meridian Steel", "Castore Logistics", "Verdant Polymers", "Atlas Freight", "Aurora Electronics", "Sahara Cables"];
+const riskBand = (n) => (n >= 80 ? C.amber : n >= 60 ? C.teal : C.mint);
+
+function BeatTheAI({ code }) {
+  const [picks, setPicks] = useState([]);
+  const [phase, setPhase] = useState("guess"); // guess | loading | result
+  const [result, setResult] = useState(null);
+  const [err, setErr] = useState("");
+  const toggle = (s) => {
+    if (phase !== "guess") return;
+    setPicks((p) => (p.includes(s) ? p.filter((x) => x !== s) : p.length < 3 ? [...p, s] : p));
+  };
+  const reveal = async () => {
+    setPhase("loading"); setErr("");
+    const r = await apiAnalyze("supplier-risk", code);
+    if (!r.ok) { setErr(r.error || "The AI couldn't run."); setPhase(result ? "result" : "guess"); return; }
+    setResult(r.result); setPhase("result");
+  };
+  const reset = () => { setPicks([]); setResult(null); setErr(""); setPhase("guess"); };
+  const aiTop3 = result ? result.suppliers.slice(0, 3).map((s) => s.name) : [];
+  const matched = picks.filter((p) => aiTop3.includes(p)).length;
+  const chartData = result ? result.suppliers.map((s) => ({ name: s.name.split(" ")[0], full: s.name, risk: s.risk })) : [];
+
+  return (
+    <Card style={{ marginBottom: 18, borderTop: `4px solid ${C.amber}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Cpu size={19} color={C.amber} /><H size={18}>Live AI Analyst — Beat the AI</H></div>
+        <Pill bg={C.deep} fg="#fff">Day 2 · Supplier risk</Pill>
+      </div>
+      <p style={{ color: C.body, fontSize: 14, lineHeight: 1.55, margin: "8px 0 12px" }}>
+        Back your judgement first: which <strong>3 suppliers</strong> carry the highest supply risk? Pick three, then watch a live AI analyse Northwind's base and see how you compare.
+      </p>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 8, marginBottom: 12 }}>
+        {RISK_SET.map((s) => {
+          const sel = picks.includes(s);
+          const inTop = phase === "result" && aiTop3.includes(s);
+          return (
+            <button key={s} onClick={() => toggle(s)} disabled={phase !== "guess"}
+              style={{ cursor: phase === "guess" ? "pointer" : "default", textAlign: "left", fontFamily: sans, fontSize: 13, fontWeight: 600,
+                padding: "9px 11px", borderRadius: 9, display: "flex", alignItems: "center", gap: 8,
+                border: `1px solid ${sel ? C.teal : inTop ? C.amber : C.line}`, background: sel ? C.cardl : inTop ? "#FDF1E7" : "#fff", color: C.ink }}>
+              {sel ? <CheckCircle2 size={15} color={C.teal} /> : <Circle size={15} color={C.muted} />}
+              <span style={{ flex: 1 }}>{s}</span>
+              {inTop && <span style={{ fontSize: 10.5, fontWeight: 700, color: C.amber }}>AI top 3</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {phase === "guess" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <Btn onClick={reveal} disabled={picks.length !== 3}><Sparkles size={15} />Reveal the AI's analysis</Btn>
+          <span style={{ fontSize: 12.5, color: C.muted }}>{picks.length}/3 picked</span>
+        </div>
+      )}
+      {phase === "loading" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, color: C.deep, fontSize: 14, fontWeight: 600, padding: "6px 0" }}>
+          <RefreshCw size={17} style={{ animation: "spin 1s linear infinite" }} /> The AI is analysing Northwind's supplier base…
+        </div>
+      )}
+      {err && <p style={{ color: C.red, fontSize: 13, marginTop: 8 }}>⚠ {err}</p>}
+
+      {phase === "result" && result && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, background: matched >= 2 ? C.greenl : C.cardl, border: `1px solid ${matched >= 2 ? C.mint : C.line}`, borderRadius: 10, padding: "10px 14px", margin: "6px 0 14px" }}>
+            <Trophy size={18} color={matched >= 2 ? C.green : C.teal} />
+            <span style={{ fontSize: 14, fontWeight: 700, color: C.navy }}>You matched {matched} of the AI's top 3 — {matched === 3 ? "perfect read!" : matched === 2 ? "strong instincts." : matched === 1 ? "one in common." : "the AI sees it differently."}</span>
+          </div>
+
+          <div style={{ background: C.navy, color: "#fff", borderRadius: 10, padding: "12px 14px", fontSize: 13.5, lineHeight: 1.55, marginBottom: 14 }}>
+            <span style={{ color: C.gold, fontWeight: 700, fontSize: 11, letterSpacing: 1 }}>AI EXECUTIVE SUMMARY</span><br />{result.narrative}
+          </div>
+
+          <H size={15} style={{ marginBottom: 6 }}>Risk ranking (AI-scored 0–100)</H>
+          <div style={{ height: Math.max(180, chartData.length * 34) }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 24 }}>
+                <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: C.muted }} />
+                <YAxis type="category" dataKey="name" width={72} tick={{ fontSize: 11, fill: C.body }} />
+                <Tooltip formatter={(v) => [`${v}/100`, "Risk"]} labelFormatter={(l, p) => (p && p[0] ? p[0].payload.full : l)} />
+                <Bar dataKey="risk" radius={[0, 4, 4, 0]}>
+                  {chartData.map((d, i) => <Cell key={i} fill={riskBand(d.risk)} stroke={picks.includes(d.full) ? C.navy : "none"} strokeWidth={picks.includes(d.full) ? 2 : 0} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <p style={{ fontSize: 11.5, color: C.muted, margin: "2px 0 14px" }}>Bars outlined in navy are your picks. Colour = risk band (amber high · teal medium · mint lower).</p>
+
+          <Table cols={[
+            { key: "name", label: "Supplier", render: (r) => <strong style={{ color: C.navy }}>{r.name}{picks.includes(r.name) ? " ●" : ""}</strong> },
+            { key: "risk", label: "Risk", align: "right", render: (r) => <Pill bg={riskBand(r.risk)} fg="#fff">{r.risk}</Pill> },
+            { key: "driver", label: "Main driver" },
+            { key: "mitigation", label: "Mitigation" },
+          ]} rows={result.suppliers} />
+
+          <div style={{ marginTop: 12, background: C.light, borderLeft: `4px solid ${C.amber}`, borderRadius: 10, padding: "10px 14px", fontSize: 13.5, color: C.ink }}>
+            <strong style={{ color: C.navy }}>Now debate it: </strong>Where do you disagree with the AI — and who's right? The AI ranks only on the facts it's given; you may know context it doesn't. That judgement is the job AI can't do for you.
+          </div>
+          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn kind="ghost" small onClick={reset}><RefreshCw size={14} />Play again</Btn>
+            <Btn kind="ghost" small onClick={reveal}><Cpu size={14} />Re-run the AI</Btn>
+          </div>
+          <p style={{ color: C.muted, fontSize: 12, marginTop: 8, fontStyle: "italic" }}>Live analysis by AI on the fictional Northwind data — results vary slightly each run, just like real models.</p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 /* ================= AI SANDBOX ================= */
-function Sandbox() {
+function Sandbox({ code }) {
   const [v, setV] = useState({ role: "", context: "", task: "", format: "" });
   return (
     <div>
       <H size={26}>AI Sandbox</H>
-      <p style={{ color: C.muted, marginTop: 6, fontSize: 14.5 }}>A free space to practise prompting. Build a prompt from the parts, or start from a pattern, then copy it into any AI tool.</p>
+      <p style={{ color: C.muted, marginTop: 6, fontSize: 14.5 }}>See AI work live on the Northwind case, then practise prompting yourself.</p>
+      <div style={{ marginTop: 18 }}><BeatTheAI code={code} /></div>
       <Card style={{ margin: "18px 0" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
           <Wand2 size={18} color={C.teal} /><H size={17}>Prompt builder</H>
@@ -1224,6 +1336,7 @@ const normCode = (c) => String(c || "").trim().toUpperCase();
 const SUPA_URL = (import.meta.env.VITE_SUPABASE_URL || "").replace(/\/$/, "");
 const SUPA_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 const FN_URL = SUPA_URL ? `${SUPA_URL}/functions/v1/cockpit-sync` : "";
+const FN_AI_URL = SUPA_URL ? `${SUPA_URL}/functions/v1/cockpit-ai` : "";
 
 const ls = {
   get(key) { try { return typeof localStorage !== "undefined" ? localStorage.getItem(key) : null; } catch { return null; } },
@@ -1254,6 +1367,16 @@ async function adminList(cohort, adminKey) {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
   return body.seats || [];
+}
+// Live AI analysis — authorised by the learner's seat code.
+async function apiAnalyze(kind, code) {
+  if (!FN_AI_URL) return { ok: false, error: "AI service not configured." };
+  try {
+    const res = await fetch(FN_AI_URL, { method: "POST", headers: fnHeaders(), body: JSON.stringify({ action: "analyze", kind, code }) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: body.error || `AI error (${res.status})` };
+    return { ok: true, result: body.result };
+  } catch (e) { return { ok: false, error: "Couldn't reach the AI service." }; }
 }
 async function adminGenerate(cohort, count, adminKey) {
   if (!FN_URL) throw new Error("Backend not configured (VITE_SUPABASE_URL is missing).");
@@ -1361,7 +1484,7 @@ function Cockpit({ learner, profiles, onPick, onClaim, onRemove, onRename, openA
         {view === "home" && <Home go={setView} weekPct={weekPct} backlogCount={backlog.length} name={learner.handle} setName={onRename} />}
         {view === "explore" && <Explore />}
         {view === "missions" && <Missions day={day} setDay={setDay} answers={answers} setAnswers={setAnswers} done={done} setDone={setDone} work={work} setWork={setWork} go={setView} />}
-        {view === "sandbox" && <Sandbox />}
+        {view === "sandbox" && <Sandbox code={learner.code} />}
         {view === "backlog" && <Backlog backlog={backlog} setBacklog={setBacklog} />}
         {view === "strategy" && <Strategy backlog={backlog} plan={plan} setPlan={setPlan} name={learner.handle} />}
       </main>
