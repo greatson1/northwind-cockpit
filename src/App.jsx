@@ -663,6 +663,66 @@ const DAYS = [
           "Strong alternative: \"Liability capped at three times annual contract value, excluding fraud, gross negligence and data breaches.\"",
           "AI gets you to a benchmarked, well-structured position in seconds — you keep the strategy: what to open with, what to trade, where to walk.",
           "Learning point: AI accelerates the legal and commercial analysis so negotiators spend their time on strategy, not clause interpretation." ] },
+      { id: "3.13det", sub: "3.13", type: "reveal", title: "Contract Risk Detective — beat the AI on a new contract",
+        brief: "A new supplier contract lands. Round 1: your team has 10 minutes to find the risks. Round 2: reveal what the AI found — it surfaces a dozen indicators in seconds, including the ones manual review misses. Then count the cost of doing this across 500 contracts.",
+        scenario: "Northwind has received a new supplier contract for signature. The extract below has six obvious problems — but a thorough review finds more. Round 1 is your team's eyes only.",
+        known: ["Unlimited liability", "No disaster recovery clause", "Weak service-level wording", "Missing audit rights", "No cybersecurity obligations", "Automatic renewal provision"],
+        round1: [{ key: "risks", label: "Round 1 · You have 10 minutes — list the risks (risk · potential impact · recommended action)", ph: "e.g. Unlimited liability → uncapped exposure → cap at 2–3× annual value; auto-renewal → silent re-lock → diarise the notice date…" }],
+        reveal: [
+          "AI identified 12 risk indicators in seconds — including the ones teams usually miss:",
+          "Missing cyber controls",
+          "Weak termination rights",
+          "Excessive liability exposure",
+          "Missing business-continuity requirements",
+          "Non-standard indemnity language",
+        ],
+        round2: [{ key: "missed", label: "Round 2 · Which risks did the AI catch that your team missed — and how long would a manual review take across all 500 contracts?", ph: "e.g. we missed the indemnity wording and business-continuity gap; 500 × 10 min ≈ 83 hours of review…" }],
+        prompt: "You are a contract risk reviewer. Review this new supplier contract extract and list every risk indicator, with its potential impact and a recommended action. The extract includes: unlimited liability; no disaster-recovery clause; weak service-level wording; missing audit rights; no cybersecurity obligations; an automatic-renewal provision. Be thorough — also find the non-obvious risks (indemnity language, termination rights, business-continuity gaps). Return a risk table and an overall risk rating.",
+        output: "A full risk register for the contract — your manual findings vs the AI's 12 indicators — and the time-saving case for AI review across 500 contracts.",
+        model: [
+          "AI typically surfaces ~12 indicators here versus the five or six a team finds in 10 minutes — including the subtle ones: indemnity language, termination rights, business-continuity gaps.",
+          "The six obvious clauses are the start, not the finish — manual review tires and misses the quiet wording risks, and two reviewers rarely find the same set.",
+          "Across 500 contracts at 10 minutes each that's ≈ 83 hours of manual review — AI does the first pass in minutes, identically every time, so people focus on the judgement calls.",
+          "Learning point: AI dramatically increases review speed AND consistency — every contract gets the same thorough first pass." ] },
+      { id: "3.14pred", sub: "3.14", type: "reveal", title: "Predict the Failure — act before the SLA breaks",
+        brief: "You're monitoring a transport supplier. The numbers are still 'green' — but the trend isn't. Round 1: decide whether to escalate. Then reveal the AI forecast and build a plan that acts before the breach, not after.",
+        scenario: "Northwind monitors a transport supplier against an 88% on-time-delivery SLA. Here's the last five months. The supplier is still meeting the SLA today.",
+        known: ["On-time delivery — Jan 98%, Feb 97%, Mar 95%, Apr 92%, May 89%", "Current SLA threshold: 88%", "The supplier is still meeting its SLA"],
+        round1: [{ key: "escalate", label: "Round 1 · Would you escalate? Why or why not? (the SLA is still being met)", ph: "e.g. no — still above 88%, no breach yet … or yes — the trend is the real signal …" }],
+        reveal: [
+          "AI forecast from the trend:",
+          "SLA breach within 30 days",
+          "Increased customer complaints",
+          "Increased operational costs",
+        ],
+        round2: [{ key: "plan", label: "Round 2 · The AI predicts a breach within 30 days. Develop a proactive response plan.", ph: "e.g. raise it at this week's review, request a recovery plan, pre-qualify a backup lane, switch to a weekly OTD check…" }],
+        prompt: "You are a supplier-performance analyst. A transport supplier's on-time delivery has fallen each month: Jan 98%, Feb 97%, Mar 95%, Apr 92%, May 89%. The SLA threshold is 88% — still being met. Forecast where this trend leads, when an SLA breach is likely, the knock-on impacts (complaints, cost), and a proactive response plan to act before the breach occurs.",
+        output: "A proactive response plan that acts on the trend — not the threshold — so you intervene before the SLA breaks, not after.",
+        model: [
+          "The number is still 'green' (89% > 88%) but the trend is unmistakable: roughly 2–3 points lost every month points to a breach within about 30 days.",
+          "Most teams say 'don't escalate' because the SLA is met — that's exactly the trap. A lagging threshold only tells you once it's too late.",
+          "AI reads the direction of travel and forecasts the breach, the complaints and the cost rise before they land.",
+          "Proactive plan: raise it now, request a supplier recovery plan, pre-qualify a backup lane, and switch from a monthly to a weekly check until it recovers.",
+          "Learning point: AI helps you act before failures occur — manage the trend, not the threshold." ] },
+      { id: "3.15cmd", sub: "3.15", type: "pick", title: "Build the AI Risk Command Centre — choose your vital signs",
+        brief: "Design Northwind's AI-powered contract-risk dashboard. The catch: you can monitor only 10 indicators. Choose your vital few, name the command centre, and pitch why they matter and what the AI should predict. Favour leading signals over lagging ones.",
+        scenario: "You've been asked to design an AI risk dashboard monitoring 500+ suppliers continuously. Compute and screen real-time is limited — pick the 10 indicators that best predict trouble.",
+        options: ["Supplier profitability", "Credit rating", "Delivery performance", "SLA breaches", "Contract expiry dates", "Regulatory changes", "Cyber incidents", "ESG compliance", "Staff turnover", "Inventory shortages", "Customer complaints", "Pricing changes", "Audit findings", "Litigation activity", "Force majeure events"],
+        limit: 10,
+        nameLabel: "Name your command centre",
+        namePh: "e.g. Northwind Supplier Risk Radar",
+        asks: [
+          { key: "why", label: "Why do these matter most? (your selection rationale)", ph: "e.g. we weighted leading financial + cyber signals over lagging delivery metrics…" },
+          { key: "predict", label: "What should the AI predict or alert on from these indicators?", ph: "e.g. supplier-failure risk score, probability of SLA breach, renewals at risk, cost-escalation alerts…" },
+        ],
+        prompt: "You are designing an AI-powered contract-risk dashboard for a manufacturer monitoring 500+ suppliers. From these candidate indicators — supplier profitability, credit rating, delivery performance, SLA breaches, contract expiry dates, regulatory changes, cyber incidents, ESG compliance, staff turnover, inventory shortages, customer complaints, pricing changes, audit findings, litigation activity, force majeure — recommend the 10 most valuable to monitor continuously, explain why each earns its place, and state what the AI should predict or alert on. Favour leading indicators over lagging ones.",
+        output: "A named risk command centre — your 10 indicators, the rationale, and what the AI predicts — ready to pitch to senior management.",
+        model: [
+          "Balance leading and lagging: lagging signals (SLA breaches, delivery performance, complaints, audit findings) tell you what already happened; leading signals (credit rating, profitability, staff turnover, cyber incidents, litigation, pricing changes) warn you before it does.",
+          "A defensible 10 usually keeps: credit rating, supplier profitability, delivery performance, SLA breaches, contract expiry, cyber incidents, regulatory changes, litigation activity, pricing changes and customer complaints — covering financial, operational, compliance and cyber.",
+          "What AI predicts: a supplier-failure risk score, probability of SLA breach, renewals/notice deadlines at risk, and cost-escalation alerts — updated continuously, not quarterly.",
+          "You can't watch everything — the discipline is choosing the 10 signals that best predict failure, which is exactly how a risk model is built.",
+          "Learning point: continuous AI monitoring turns a periodic manual review into a live early-warning system." ] },
     ],
   },
   {
@@ -1400,6 +1460,7 @@ const TYPE_META = {
   innovsprint: { c: C.gold, t: "Innovation lab", how: "Pick a challenge, generate supplier-led ideas with AI, score each on four criteria, choose the best and build a short business case to present.", gain: "Practises running a structured buyer-supplier innovation sprint with AI as the idea engine." },
   lifecycle: { c: C.teal, t: "Time machine", how: "For each contract-lifecycle stage, set the AI-enabled time and name the AI solution — staying inside your AI capability card — and watch the total cycle time shrink live. Then pressure-test the redesign with AI.", gain: "Moves you from single AI tools to designing AI across the whole contract lifecycle (CLM) — where the largest organisational savings sit." },
   reveal: { c: C.deep, t: "Reveal & decide", how: "Work the problem with the limited information a human would normally have and write your Round-1 read, then reveal the hidden AI findings and revise your decision in Round 2. Pressure-test with AI if a prompt is provided.", gain: "Shows how AI surfaces the motivations and trade-offs you can't see — so you negotiate on the real position, not just the stated one." },
+  pick: { c: C.teal, t: "Build & pitch", how: "Choose your top indicators within the limit, name your dashboard, then explain why they matter and what AI should predict from them — and pitch it.", gain: "Practises the core risk-monitoring discipline: choosing the few signals that best predict failure — exactly how an AI risk model is built." },
 };
 // What data each activity type uses, so delegates know exactly what to work from.
 const DATA_NOTE = {
@@ -1428,6 +1489,7 @@ const DATA_NOTE = {
   innovsprint: "Provided — the challenge below (edit to your own).",
   lifecycle: "Provided below — today's cycle time per lifecycle stage; you set the AI-enabled times.",
   reveal: "Provided below — the limited human-visible facts; the AI findings are revealed when you're ready.",
+  pick: "Provided below — choose from the candidate indicators shown.",
 };
 // Where a delegate would realistically source this kind of data back at work.
 const REAL_SOURCE = {
@@ -1439,6 +1501,7 @@ const REAL_SOURCE = {
   pack: "the supplier's performance data from your ERP and the meeting context from your category team.",
   lifecycle: "your CLM or contract register for current cycle times, and your legal and operations teams for where the delays really are.",
   reveal: "your own market intelligence, credit/financial data and account history — plus what AI can infer about the other side's likely position.",
+  pick: "your ERP, finance and risk systems, credit agencies, and news/regulatory feeds — the data behind each indicator.",
   develop: "supplier performance from your ERP/quality system and spend from your spend cube.",
   innovate: "your cost and sustainability baselines, plus ideas sourced directly from suppliers.",
   innovsprint: "your cost, waste and emissions data, plus supplier-submitted ideas from a joint innovation session.",
@@ -2145,6 +2208,59 @@ function RevealBody({ a, wk, patch, note, setNote, complete, go }) {
     </div>
   );
 }
+// Day 3 "Build & pitch" — choose your top-N indicators from a candidate list
+// (capped), name the dashboard, justify and say what AI should predict. Used by
+// the Risk Command Centre exercise; reusable for any "pick the vital few" design.
+function PickBody({ a, wk, patch, note, setNote, complete, go }) {
+  const picks = wk.picks || [];
+  const name = wk.name || "";
+  const f = wk.f || {};
+  const limit = a.limit || 10;
+  const asks = a.asks || [];
+  const writeNote = (p, nm, ff) => {
+    setNote(`${a.nameLabel || "Name"}: ${nm || "—"}\nIndicators (${p.length}/${limit}): ${p.join(", ") || "—"}\n${asks.map((q) => `${q.label}: ${(ff[q.key] || "").trim() || "—"}`).join("\n")}`);
+  };
+  const chk = (p, nm, ff) => { if (p.length > 0 && (nm || "").trim() && asks.every((q) => (ff[q.key] || "").trim())) complete(); writeNote(p, nm, ff); };
+  const toggle = (x) => {
+    let p;
+    if (picks.includes(x)) p = picks.filter((y) => y !== x);
+    else { if (picks.length >= limit) return; p = [...picks, x]; }
+    patch({ picks: p }); chk(p, name, f);
+  };
+  const setName = (v) => { patch({ name: v }); chk(picks, v, f); };
+  const setF = (k, v) => { const n = { ...f, [k]: v }; patch({ f: n }); chk(picks, name, n); };
+  const inp = { fontFamily: sans, fontSize: 13.5, padding: "8px 11px", border: `1px solid ${C.line}`, borderRadius: 8, color: C.ink, background: "#fff" };
+  const ta = { width: "100%", boxSizing: "border-box", resize: "vertical", fontFamily: sans, fontSize: 13.5, padding: "9px 11px", border: `1px solid ${C.line}`, borderRadius: 8, color: C.ink, background: "#fff", lineHeight: 1.45 };
+  return (
+    <div>
+      <p style={{ color: C.body, fontSize: 14, lineHeight: 1.55, marginTop: 4 }}>{a.brief}</p>
+      <div style={{ background: C.navy, color: "#fff", borderRadius: 10, padding: "12px 14px", fontSize: 13.5, lineHeight: 1.55, margin: "6px 0 14px" }}>
+        <span style={{ color: C.gold, fontWeight: 700, fontSize: 11, letterSpacing: 1 }}>THE BRIEF</span><br />{a.scenario}
+      </div>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: picks.length >= limit ? C.green : C.navy, marginBottom: 8 }}>Choose up to {limit} indicators ({picks.length}/{limit})</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+        {(a.options || []).map((o) => { const sel = picks.includes(o); const full = !sel && picks.length >= limit; return (
+          <button key={o} onClick={() => toggle(o)} disabled={full} style={{ cursor: full ? "not-allowed" : "pointer", fontFamily: sans, fontSize: 13, fontWeight: 600, padding: "7px 12px", borderRadius: 999, border: `1px solid ${sel ? C.teal : C.line}`, background: sel ? C.teal : "#fff", color: sel ? "#fff" : (full ? C.muted : C.body), opacity: full ? 0.55 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {sel && <Check size={13} />}{o}
+          </button>
+        ); })}
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 700, color: C.navy, marginBottom: 6 }}>{a.nameLabel || "Name your dashboard"}</div>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={a.namePh || "e.g. Northwind Supplier Risk Radar"} style={{ ...inp, width: "100%", boxSizing: "border-box" }} />
+      </div>
+      {asks.map((q) => (
+        <div key={q.key} style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.navy, marginBottom: 6 }}>{q.label}</div>
+          <textarea value={f[q.key] || ""} onChange={(e) => setF(q.key, e.target.value)} rows={3} placeholder={q.ph} style={ta} />
+        </div>
+      ))}
+      {a.prompt && <><PromptBox text={a.prompt} /><div style={{ marginTop: 10 }}><Btn small onClick={() => go("chat")}><MessageSquare size={14} />Open AI Chat</Btn></div></>}
+      <div style={{ marginTop: 14, background: C.light, borderLeft: `4px solid ${C.amber}`, borderRadius: 10, padding: "10px 14px", fontSize: 13.5, color: C.ink }}><strong style={{ color: C.navy }}>Output: </strong>{a.output}</div>
+      <ModelAnswer open={!!wk.reveal} onToggle={() => patch({ reveal: !wk.reveal })} lines={a.model} />
+    </div>
+  );
+}
 const EFFORT = ["Low", "Medium", "High"];
 function SprintBody({ a, wk, patch, note, setNote, complete, go }) {
   const challenge = wk.challenge != null ? wk.challenge : (a.challenge || "");
@@ -2754,6 +2870,7 @@ function Activity({ a, answers, setAnswers, done, setDone, work, setWork, go, ba
         {a.type === "develop" && <DevelopBody {...common} />}
         {a.type === "lifecycle" && <LifecycleBody {...common} />}
         {a.type === "reveal" && <RevealBody {...common} />}
+        {a.type === "pick" && <PickBody {...common} />}
         {a.type === "innovate" && <SprintBody {...common} />}
         {a.type === "promptlab" && <PromptLabBody {...common} />}
         {a.type === "scorecard" && <ScorecardBody {...common} />}
@@ -2800,6 +2917,7 @@ const DAY_SECTIONS = [
   { id: "applied", label: "AI in SRM — applied exercises" },
   { id: "applied3", label: "AI in contracts & risk — applied exercises" },
   { id: "neg3", label: "Module 2 · AI in negotiation" },
+  { id: "mon3", label: "Module 3 · AI risk monitoring" },
   { id: "m2", label: "Module 2 · Predicting performance" },
   { id: "m3", label: "Module 3 · Risk & resilience" },
   { id: "m4", label: "Module 4 · Collaboration & innovation" },
@@ -2811,6 +2929,7 @@ const SECTION_OF = {
   "m4friction": "m4", "m4comms": "m4", "m4innov": "m4",
   "3.6cr": "applied3", "3.7itt": "applied3", "3.8clm": "applied3", "3.9hai": "applied3",
   "3.10mind": "neg3", "3.11opt": "neg3", "3.12clause": "neg3",
+  "3.13det": "mon3", "3.14pred": "mon3", "3.15cmd": "mon3",
 };
 function sectionGroups(activities) {
   return DAY_SECTIONS.map((s) => ({ s, items: activities.filter((a) => (SECTION_OF[a.id] || "core") === s.id) })).filter((g) => g.items.length);
