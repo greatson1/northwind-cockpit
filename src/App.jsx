@@ -723,6 +723,61 @@ const DAYS = [
           "What AI predicts: a supplier-failure risk score, probability of SLA breach, renewals/notice deadlines at risk, and cost-escalation alerts — updated continuously, not quarterly.",
           "You can't watch everything — the discipline is choosing the 10 signals that best predict failure, which is exactly how a risk model is built.",
           "Learning point: continuous AI monitoring turns a periodic manual review into a live early-warning system." ] },
+      { id: "3.16fac", sub: "3.16", type: "lifecycle", title: "The Contract Factory — halve the cycle time",
+        brief: "Northwind gets 50 new supplier-contract requests this month, and each crawls through a manual chain that averages 10 days. As the AI Transformation Team, redesign the contract factory: set the AI-enabled time for each step and name the AI solution. Your challenge — cut the cycle by at least 50%.",
+        scenario: "Today every new contract request runs through four manual steps — request, template, draft, legal review — averaging 10 days end to end. Redesign it with AI and at least halve that, then think about what it means across 50 requests a month.",
+        scale: "per request · × 50 a month",
+        stages: [
+          { stage: "Request submitted", current: "1 day", days: 1, hint: "an AI intake form captures and validates the request instantly" },
+          { stage: "Template selected", current: "1 day", days: 1, hint: "AI picks the right template from the request type & value" },
+          { stage: "Draft created", current: "5 days", days: 5, hint: "AI generates the first draft from the template + requirements" },
+          { stage: "Legal review initiated", current: "3 days", days: 3, hint: "AI flags risk clauses and routes to the right reviewer" },
+        ],
+        prompt: "You are a contract lifecycle management (CLM) consultant. A manufacturer receives 50 new supplier-contract requests a month. Today each runs through four manual steps — request submitted (1 day), template selected (1 day), draft created (5 days), legal review initiated (3 days) — averaging 10 days. Redesign this contract-creation workflow with AI. For each step give the AI solution, the realistic new time and the benefit. Show the new total cycle time and the % reduction (target at least 50%), and what it means across 50 requests a month. Keep a human on the legal judgement.",
+        output: "A redesigned contract factory that cuts the 10-day cycle by at least half — and the admin effort it removes across 50 requests a month.",
+        model: [
+          "Most of the 10 days is repetitive admin — intake, template choice and first-draft creation. That's exactly what AI removes, often taking the cycle from ~10 days to ~3–4.",
+          "Drafting is the biggest single win: AI generates the first draft in minutes from the template plus the request details.",
+          "Legal review still needs a human, but AI shortens it — pre-flagging risk clauses and routing to the right reviewer so they start with the issues, not a blank read.",
+          "Across 50 requests a month a per-request saving compounds fast — that's days of effort returned to the team every month.",
+          "Learning point: AI removes the repetitive administrative effort so people spend their time on judgement, not paperwork." ] },
+      { id: "3.17cop", sub: "3.17", type: "pick", title: "Build Your AI Contract Copilot — the vital 10 features",
+        brief: "Design an AI assistant for Northwind's contract managers — the tool they'd open every day. The catch: it can do only 10 things. Choose the 10 highest-value capabilities, name the Copilot, and pitch the features and the business benefits.",
+        scenario: "You're designing an AI assistant for contract managers handling hundreds of live contracts. Pick the 10 capabilities that deliver the most value day to day — focus on outcomes, not shiny features.",
+        options: ["Clause analysis", "Risk identification", "Renewal alerts", "Obligation tracking", "KPI monitoring", "Executive reporting", "Supplier performance analysis", "Contract summaries", "Compliance monitoring", "Workflow routing", "ESG tracking", "Cyber risk monitoring", "Contract search", "Audit preparation", "Spend analysis"],
+        limit: 10,
+        nameLabel: "Name your Contract Copilot",
+        namePh: "e.g. Northwind Contract Copilot",
+        asks: [
+          { key: "features", label: "Why these 10? (what makes them high-value in a contract manager's day)", ph: "e.g. renewal alerts + obligation tracking stop value leaking; summaries + search save hours every week…" },
+          { key: "benefits", label: "Business benefits — what does the Copilot deliver?", ph: "e.g. fewer missed renewals, faster reviews, consistent compliance, time back for negotiation…" },
+        ],
+        prompt: "You are designing an AI assistant ('Copilot') for contract managers. From these candidate capabilities — clause analysis, risk identification, renewal alerts, obligation tracking, KPI monitoring, executive reporting, supplier performance analysis, contract summaries, compliance monitoring, workflow routing, ESG tracking, cyber risk monitoring, contract search, audit preparation, spend analysis — recommend the 10 highest-value for daily use, explain why each earns its place, and state the business benefit of the assistant overall.",
+        output: "A named Contract Copilot — your 10 features and the business benefits — ready to pitch to the team that would use it every day.",
+        model: [
+          "Pick for daily value, not novelty: renewal alerts, obligation tracking, clause analysis, contract summaries and search are the bread-and-butter that save hours and stop value leaking.",
+          "Add the risk/compliance layer — risk identification, compliance monitoring, supplier performance — so the Copilot manages exposure, not just paperwork.",
+          "Executive reporting earns a slot because it turns the manager's daily work into something the board can see.",
+          "The discipline is saying no: ESG/cyber/spend may matter, but a focused 10 that a manager actually uses beats 15 they ignore.",
+          "Learning point: the value is in high-value use cases, not the feature count — design around the job to be done." ] },
+      { id: "3.18tank", sub: "3.18", type: "pack", title: "CLM Transformation Shark Tank — pitch the business case",
+        brief: "Northwind's Board has put £500,000 on the table to improve contract management. Your team is the consulting firm. Build the business case for an AI-enabled CLM platform — six parts, generated with AI — then pitch it in five minutes and let the 'Board' score you on innovation, practicality, ROI, risk reduction and overall value.",
+        scenario: "The Board's brief: £500,000 to transform how Northwind manages its 5,000 contracts. Build a board-ready business case for an AI-enabled CLM platform and pitch it like you're winning the deal.",
+        items: [
+          { key: "problems", label: "Current problems", prompt: "You are a CLM consultant pitching to a manufacturer's board. Summarise the current contract-management problems for a business that manages 5,000 supplier contracts manually: contracts on silent auto-renew, missed notice deadlines, uncapped liabilities, no post-signature monitoring, slow 10-day drafting cycles and inconsistent risk review. Make it punchy — the problem statement that justifies investment." },
+          { key: "features", label: "Proposed AI features", prompt: "Propose the core AI features of an AI-enabled CLM platform for a manufacturer: AI drafting, clause risk analysis, obligation & renewal tracking with alerts, continuous risk monitoring, supplier-performance analytics and executive dashboards. For each, one line on what it does." },
+          { key: "benefits", label: "Benefits", prompt: "List the measurable benefits of an AI-enabled CLM platform: reduced contract cycle time, fewer missed renewals, lower liability exposure, improved compliance, better supplier performance and time returned to the team. Quantify where reasonable with stated assumptions." },
+          { key: "risks", label: "Risks", prompt: "List the main risks of implementing an AI-enabled CLM platform — data quality and migration, user adoption and change management, over-reliance on AI for legal decisions, integration with existing ERPs, and security — and a mitigation for each." },
+          { key: "roi", label: "Expected ROI (within £500k)", prompt: "Build the ROI case for a £500,000 AI-enabled CLM investment for a manufacturer managing 5,000 contracts. Estimate annual savings (cycle-time reduction, avoided auto-renewals and value leakage, fewer disputes, admin time saved), the payback period and a 3-year ROI %. State your assumptions and present as a short table." },
+          { key: "roadmap", label: "Implementation roadmap", prompt: "Create a phased 12-month implementation roadmap for an AI-enabled CLM platform: discovery & data, pilot on a high-risk contract category, rollout, and continuous-monitoring go-live. For each phase give the timeframe, key activities and the success measure." },
+        ],
+        output: "A board-ready business case for an AI-enabled CLM platform — problems, AI features, benefits, risks, ROI and roadmap — ready to pitch in five minutes and defend under Shark-Tank scoring.",
+        model: [
+          "Win the room by connecting AI to measurable outcomes: reduced cycle time, improved compliance, lower risk and better supplier performance — not 'we'll use AI'.",
+          "The ROI must live inside £500k and show payback: cycle-time savings + avoided auto-renewals/value leakage usually pay it back well inside a year at this contract volume.",
+          "Be honest about risk — data quality, adoption and over-reliance on AI for legal calls — and show mitigations; boards trust a pitch that names its risks.",
+          "Phase the roadmap: prove it on one high-risk category first, then scale — don't boil the ocean across 5,000 contracts on day one.",
+          "Learning point: the strategic value of AI-enabled CLM is the business case — automation tied to cycle time, compliance, risk and performance the board can measure." ] },
     ],
   },
   {
@@ -2019,7 +2074,7 @@ function PackBody({ a, wk, patch, note, setNote, complete, go }) {
         <span style={{ color: C.gold, fontWeight: 700, fontSize: 11, letterSpacing: 1 }}>THE SITUATION</span><br />{a.scenario}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: C.navy }}>Generate all four with AI — your pack in minutes. ({doneCount}/{items.length})</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: C.navy }}>Generate all {items.length} with AI — your pack in minutes. ({doneCount}/{items.length})</span>
         <Btn small onClick={() => go("chat")}><MessageSquare size={14} />Open AI Chat</Btn>
       </div>
       {items.map((it, i) => (
@@ -2137,7 +2192,7 @@ function LifecycleBody({ a, wk, patch, note, setNote, complete, go }) {
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", background: saved > 0 ? C.greenl : C.cardl, border: `1px solid ${saved > 0 ? C.mint : C.line}`, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
         <span style={{ fontSize: 13.5, color: C.body }}>Cycle time: <strong style={{ color: C.navy }}>{totalCur} days</strong> → <strong style={{ color: saved > 0 ? C.green : C.navy }}>{Math.round(totalAi)} days</strong></span>
         {saved > 0 && <span style={{ fontSize: 15, fontWeight: 800, color: C.green }}>{saved}% faster</span>}
-        <span style={{ fontSize: 12, color: C.muted }}>per contract · × 5,000 contracts</span>
+        <span style={{ fontSize: 12, color: C.muted }}>{a.scale || "per contract · × 5,000 contracts"}</span>
       </div>
       <div style={{ fontSize: 12.5, fontWeight: 700, color: C.navy, marginBottom: 6 }}>Pressure-test the redesign with AI</div>
       <PromptBox text={a.prompt} />
@@ -2918,6 +2973,7 @@ const DAY_SECTIONS = [
   { id: "applied3", label: "AI in contracts & risk — applied exercises" },
   { id: "neg3", label: "Module 2 · AI in negotiation" },
   { id: "mon3", label: "Module 3 · AI risk monitoring" },
+  { id: "clm4", label: "Module 4 · CLM automation & transformation" },
   { id: "m2", label: "Module 2 · Predicting performance" },
   { id: "m3", label: "Module 3 · Risk & resilience" },
   { id: "m4", label: "Module 4 · Collaboration & innovation" },
@@ -2930,6 +2986,7 @@ const SECTION_OF = {
   "3.6cr": "applied3", "3.7itt": "applied3", "3.8clm": "applied3", "3.9hai": "applied3",
   "3.10mind": "neg3", "3.11opt": "neg3", "3.12clause": "neg3",
   "3.13det": "mon3", "3.14pred": "mon3", "3.15cmd": "mon3",
+  "3.16fac": "clm4", "3.17cop": "clm4", "3.18tank": "clm4",
 };
 function sectionGroups(activities) {
   return DAY_SECTIONS.map((s) => ({ s, items: activities.filter((a) => (SECTION_OF[a.id] || "core") === s.id) })).filter((g) => g.items.length);
