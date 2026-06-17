@@ -910,6 +910,52 @@ const DAYS = [
         tasks: ["Prioritise initiatives on value and readiness.", "Sequence a phased roadmap (foundations → quick wins → scale → transform).", "Address people, ethics and governance.", "Be ready to present a one-page strategy."],
         rubric: ["Maps every initiative to a board goal", "Phases foundations → quick wins → scale → transform", "Addresses people, ethics and governance — not just the tech", "Leads with the data foundation that unlocks the rest", "Reads as a crisp one-pager a board could act on"],
         deliverable: "Your one-page AI strategy. Open My Strategy to assemble and export it.", to: "strategy" },
+      { id: "5.6wf", sub: "5.6", type: "pick", title: "Build an AI Procurement Workforce — fund the right 5 agents",
+        brief: "You're the leadership team of Northwind Procurement: £800m of spend, six chronic problems, and the CPO has funded only five AI agents. Choose your workforce — the five specialist agents that solve the most valuable problems — then name it, justify each pick, and spend a bonus £100k on one more.",
+        scenario: "Northwind spends £800m a year across logistics, technology, facilities and professional services. Pain points: 16-week tenders, manual supplier-risk reviews, missed contract renewals, an overloaded team, poor spend visibility and inconsistent supplier-performance reviews. The CPO will fund five AI agents. Choose wisely.",
+        options: ["Demand Planning Agent", "Market Intelligence Agent", "Sourcing Agent", "Evaluation Agent", "Negotiation Agent", "Contract Agent", "Supplier Risk Agent", "Supplier Performance Agent", "Spend Analytics Agent", "Invoice Compliance Agent"],
+        limit: 5,
+        nameLabel: "Name your AI procurement workforce",
+        namePh: "e.g. Northwind Procurement AI Squad",
+        asks: [
+          { key: "rationale", label: "For each agent — the problem it solves, the benefit, and the human oversight it needs", ph: "e.g. Contract Agent → catches missed renewals → stops silent cost creep → a human approves every renewal/exit decision…" },
+          { key: "bonus", label: "Bonus — you have +£100k for ONE more agent. Which delivers the highest ROI, and why?", ph: "e.g. Spend Analytics Agent — surfaces savings across £800m that more than pay for the whole programme…" },
+        ],
+        prompt: "You are designing an AI agent workforce for an £800m procurement function. Challenges: 16-week tenders, manual supplier-risk reviews, missed contract renewals, an overloaded team, limited spend visibility and inconsistent supplier-performance reviews. From these agents — Demand Planning, Market Intelligence, Sourcing, Evaluation, Negotiation, Contract, Supplier Risk, Supplier Performance, Spend Analytics, Invoice Compliance — recommend the five highest-value to fund first. For each, state the problem it solves, the benefit, and the human oversight required. Then name the single extra agent you'd add with a small extra budget, and justify its ROI.",
+        output: "A funded five-agent AI procurement workforce — each tied to a problem, a benefit and its human guardrail — plus your highest-ROI bonus agent, ready to present.",
+        model: [
+          "Match agents to your biggest pains: Spend Analytics (savings on £800m), Contract Agent (missed renewals), Supplier Risk (manual reviews) and Sourcing (16-week tenders) usually earn their place fast.",
+          "The fifth pick is the judgement call — Market Intelligence or Supplier Performance, depending on whether you're more exposed on price/market or on supplier delivery.",
+          "Every agent needs a human guardrail: agents propose, people approve — especially on award, risk acceptance and anything binding.",
+          "Bonus ROI: Invoice Compliance or Spend Analytics often pays for itself — recovered duplicate payments and surfaced savings can fund the whole programme.",
+          "Learning point: agentic AI works best as a team of specialists; not everything should be automated, you must prioritise where agents add most value, and governance stays central." ] },
+      { id: "5.7auto", sub: "5.7", type: "reveal", title: "The Autonomous Procurement Challenge — orchestrate the agents",
+        brief: "An urgent £30m sourcing lands with an 8-week deadline. Design how a team of AI agents would deliver it: Step 1, sequence the agents; Step 2, set the human approval gates. Then reveal a live escalation and decide how your agents respond — and tell the CPO how much faster procurement becomes.",
+        scenario: "The Operations Director needs a national logistics provider within 8 weeks for a major expansion — a contract worth £30m over five years. The CPO asks: 'How would a team of AI agents deliver this procurement, and what still needs a human?'",
+        known: ["Available agents: Demand · Market Intelligence · Sourcing · Evaluation · Risk · Negotiation · Contract · Supplier Performance", "Requirement: national logistics provider, £30m over 5 years", "Deadline: 8 weeks"],
+        round1: [
+          { key: "workflow", label: "Step 1 · Arrange the agents in the order they would operate (Demand → Market Intelligence → Sourcing → …)", ph: "e.g. Demand → Market Intelligence → Sourcing → Evaluation → Risk → Negotiation → Contract → Supplier Performance" },
+          { key: "gates", label: "Step 2 · Where must a human approve? (the gates agents cannot pass alone)", ph: "e.g. approve the sourcing strategy, the shortlist, the contract award, and any risk acceptance…" },
+        ],
+        reveal: [
+          "ESCALATION — mid-process, your facilitator introduces one of these:",
+          "A · The selected supplier suffers a cyber breach",
+          "B · The supplier submits a 12% price increase",
+          "C · New ESG regulations take effect",
+          "D · A key supplier is downgraded by a credit agency",
+        ],
+        round2: [
+          { key: "response", label: "Step 3 · Take one event above — how do your agents respond? Which agents engage, what do they recommend, and who approves the final call?", ph: "e.g. cyber breach → Risk Agent quantifies exposure, Market Intelligence finds alternatives, Negotiation/Contract re-open terms; a human approves proceed / pause / switch…" },
+          { key: "metrics", label: "Final · The CPO's question — current state vs agentic-AI state (cycle time, supplier-risk monitoring, contract review time, market intelligence, procurement capacity)", ph: "e.g. cycle 16 wks → ~6 wks; risk monthly/manual → continuous; contract review days → hours; market intel periodic → always-on; capacity freed for strategy…" },
+        ],
+        prompt: "You are an agentic-AI procurement architect. A manufacturer needs a national logistics provider within 8 weeks (contract £30m over 5 years). Design a multi-agent workflow using these agents — Demand, Market Intelligence, Sourcing, Evaluation, Risk, Negotiation, Contract, Supplier Performance. Give: (1) the order they operate in, (2) the human approval gates, (3) how the team responds if the selected supplier suffers a cyber breach mid-process — which agents engage, what they recommend, and who approves — and (4) a current-state vs agentic-state comparison for cycle time, supplier-risk monitoring, contract review time, market intelligence and procurement capacity.",
+        output: "A multi-agent procurement workflow — sequence, human approval gates, an escalation response and a current-vs-agentic before/after — showing what a digital procurement workforce changes, and what still needs a human.",
+        model: [
+          "A natural sequence: Demand → Market Intelligence → Sourcing → Evaluation → Risk → Negotiation → Contract → Supplier Performance — each agent hands its output to the next.",
+          "Human gates are non-negotiable at the sourcing strategy, the supplier shortlist, the contract award and any risk acceptance. Agents prepare the decision; people make it.",
+          "On a cyber breach: the Risk Agent quantifies exposure, Market Intelligence surfaces alternatives, and Negotiation/Contract re-open terms — but a human approves whether to proceed, pause or switch supplier.",
+          "Before → after: cycle ~16 weeks → ~6–8; risk monitoring monthly/manual → continuous; contract review days → hours; market intelligence periodic → always-on; capacity freed from admin to strategy.",
+          "Learning point: this is the leap from Generative AI (one task) and an AI Copilot (one user assisted) to Agentic AI — a coordinated team of agents delivering a business objective, with humans on the gates." ] },
     ],
   },
 ];
@@ -2974,6 +3020,7 @@ const DAY_SECTIONS = [
   { id: "neg3", label: "Module 2 · AI in negotiation" },
   { id: "mon3", label: "Module 3 · AI risk monitoring" },
   { id: "clm4", label: "Module 4 · CLM automation & transformation" },
+  { id: "agentic5", label: "Agentic AI — applied exercises" },
   { id: "m2", label: "Module 2 · Predicting performance" },
   { id: "m3", label: "Module 3 · Risk & resilience" },
   { id: "m4", label: "Module 4 · Collaboration & innovation" },
@@ -2987,6 +3034,7 @@ const SECTION_OF = {
   "3.10mind": "neg3", "3.11opt": "neg3", "3.12clause": "neg3",
   "3.13det": "mon3", "3.14pred": "mon3", "3.15cmd": "mon3",
   "3.16fac": "clm4", "3.17cop": "clm4", "3.18tank": "clm4",
+  "5.6wf": "agentic5", "5.7auto": "agentic5",
 };
 function sectionGroups(activities) {
   return DAY_SECTIONS.map((s) => ({ s, items: activities.filter((a) => (SECTION_OF[a.id] || "core") === s.id) })).filter((g) => g.items.length);
